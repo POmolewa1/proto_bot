@@ -1,0 +1,8 @@
+# virtual environment and environment variables 
+.venv/
+.env
+
+# Cashed files
+__pycache__
+
+
