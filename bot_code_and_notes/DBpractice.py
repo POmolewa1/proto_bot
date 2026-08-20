@@ -1,8 +1,10 @@
 import psycopg2 as db
 import os 
 from dotenv import load_dotenv
+
 load_dotenv()
 import logging
+from SteamPractice import *
 
 logger = logging.getLogger(__name__)
 #conn = db.connect(host= os.getenv("DB_HOST"), dbname=os.getenv("DB_NAME"), user=os.getenv("USER"), password=os.getenv("PASSWORD"),port=os.getenv("PORT"))
@@ -103,7 +105,7 @@ def initialize_db():
         steam_hours INT DEFAULT 0,
         steam_games_count INT DEFAULT 0,
         total_gaming_hours INT DEFAULT 0,
-        auto_sync BOOLEAN DEFAULT FALSE
+        auto_sync_steam BOOLEAN DEFAULT FALSE
     );
     """)
     logger.info(f"Verified table: users")
@@ -124,8 +126,8 @@ def initialize_db():
         game_name VARCHAR(255),
 
         on_steam BOOLEAN,
-        img VARCHAR (255),
-        steam_app_id INT
+        img TEXT,
+        steam_app_id INT UNIQUE
     );
     """)
     logger.info(f"Verified table: games")
@@ -213,14 +215,39 @@ def close_connection(conn,cur):
 # ADD COLUMN price VARCHAR(255)
 # """)
 
+def link_steam_library(library_data : dict):
+    #conn,cur = create_connection()
+
+    game_count = library_data['game_count']
+    # cur.execute(
+    #     """INSERT INTO general_steam_data (steam_games_count)
+    #         VALUES (%s)
+    #     """,(game_count))
+
+    # need to make sure to do a db lookup to see if the game already exists
+    # might need to use locks to ensure one sync at a time
+    for game in library_data['games']:
+        game_id = game['appid']
+        name = game['name']
+        playtime = game['playtime_forever']
+        img = get_steam_image(game_id)
+        print(f"{game_id} {name} {playtime} {img}")
+
+    # INSERT INTO games (steam_app_id, game_name, image_url)
+    # VALUES (%s, %s, %s)
+    # ON CONFLICT (steam_app_id) DO NOTHING;
+
+
+
 def add_cost(price):
     conn,cur = create_connection()
 
-    cur.execute("""UPDATE person
-    SET
-        person.price = %s
-    WHERE person.credit_score > 799;
-    """,(price,))
+    cur.execute(
+        """UPDATE person
+        SET
+            person.price = %s
+        WHERE person.credit_score > 799;
+        """,(price,))
 
     close_connection(conn,cur)
 

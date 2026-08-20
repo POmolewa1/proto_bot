@@ -21,7 +21,7 @@ on_presence_update()
 
 ## Steam linking
 
-1. When linking steam add all the games found to the games list
+1. When linking steam will add all the games found to the games list
 2. Auto sync will be on by default unless the user changes their profile settings or unliks their steam
 3. When user unlinks their steam remove steam id from **users**, remove all **user_games** that haven't been seen from activity monitoring, delete row from **general_steam_data**
 4. User can either link through a custom id url or through steam id

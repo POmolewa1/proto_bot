@@ -1,7 +1,9 @@
 import os
 from dotenv import load_dotenv
+
 load_dotenv()
 from steam_web_api import Steam
+from DBpractice import *
 
 KEY = os.getenv("STEAM_API_KEY")
 
@@ -50,9 +52,48 @@ title = 930210
     # else:
     #     print(f"{game['name']}")
 
+user = steam.users.get_owned_games("76561198965639452")
+# for game in user['games']:
+#     print(game)
+user = steam.users.get_user_details("76561198965639452")
+#game = user['games'][0]['name']
+#print(user)
+
+# game_id = user['games'][0]['appid']
+# game_info = steam.apps.get_app_details(game_id)
+# for key in game_info[f'{game_id}']['data']:
+#     print(key)
+
 def print_price():
     title = 2246340
     game = steam.apps.get_app_details(title,None,"price_overview")
     pricef = game['{}'.format(title)]['data']['price_overview']['final_formatted']
     return pricef
+
+def verify_steam_access(steam_id : str):
+    user = steam.users.get_user_details(steam_id)
+    # The user was not found
+    if user['player'] == None:
+        return 1, None
     
+    # The user's profile is not private
+    if user['player']['communityvisibilitystate'] != 3:
+        return 2, user['player']['personaname']
+
+    return 0, user['player']['personaname']
+
+def add_steam_game_library(steam_id : str, conn, cur):
+    steam_library = steam.users.get_owned_games(steam_id)
+    return steam_library
+
+def get_steam_image(appid : int):
+    details = steam.apps.get_app_details(appid)
+    if details[f'{appid}']['success']:
+        image = details[f'{appid}']['data']['header_image']
+        return image
+
+    return None
+    
+if __name__ == "__main__":
+    link_steam_library(add_steam_game_library("76561198965639452",None,None))
+    #print(add_steam_game_library("76561198965639452",None,None))
