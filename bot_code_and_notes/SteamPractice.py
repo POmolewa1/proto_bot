@@ -3,8 +3,15 @@ from dotenv import load_dotenv
 
 load_dotenv()
 from steam_web_api import Steam
-from DBpractice import *
+#from DBpractice import *
+import datetime as dt
+from datetime import timezone
+from dateutil.relativedelta import relativedelta
+import requests
+import logging
+import time
 
+logger = logging.getLogger(__name__)
 KEY = os.getenv("STEAM_API_KEY")
 
 steam = Steam(KEY)
@@ -52,23 +59,101 @@ title = 930210
     # else:
     #     print(f"{game['name']}")
 
-user = steam.users.get_owned_games("76561198965639452")
+# user = steam.users.get_owned_games("76561198138082742")
 # for game in user['games']:
-#     print(game)
-user = steam.users.get_user_details("76561198965639452")
+#     print(f"{game['name']} time played {game['playtime_forever']}")
+# user = steam.users.get_user_details("76561198965639452")
 #game = user['games'][0]['name']
-#print(user)
+# print(user)
 
 # game_id = user['games'][0]['appid']
-# game_info = steam.apps.get_app_details(game_id)
+# game_id = 930210
+#game_info = steam.apps.get_app_details(game_id)
+# game_info = steam.apps.search_games("Warhammer: Vermintide 2")
+# print(game_info['apps'][0])
 # for key in game_info[f'{game_id}']['data']:
 #     print(key)
+
+
+# game_data = steam.apps.search_games("balls in space")
+# print(game_data['apps'])
+# if len(game_data['apps']) == 0:
+#     print("no result")
+
+
+# date_created = 1558540534
+# date = dt.datetime.fromtimestamp(date_created,tz = timezone.utc)
+# curr_date = dt.datetime.now(timezone.utc)
+# age = relativedelta(curr_date, date)
+# print(f"{age.years} years {age.months} months {age.days} days")
+
+# user = steam.users.search_user("bob")
+# if user == "No match":
+#     print("user not found")
+# else:
+#     print(user)
+
+
+# game = steam.apps.get_app_details(4866180,None,"price_overview")
+# if len(game['4866180']['data']) == 0:
+#     print(game)
+
+# time = dt.timedelta(seconds=5543400)
+# print(time)
+
+# user = steam.users.get_user_recently_played_games("76561198965639452")
+# print(user)
+
+# tday = dt.datetime.now(tz = timezone.utc)
+# subtract = dt.timedelta(days=1)
+# print(tday - subtract)
+
+# game_info = steam.apps.search_games("Warhammer: Vermintide 2")
+# print(game_info['apps'][0])
+
+# Steam only exposes recently played games for a limited period.
+# Since exact last-played dates aren't reliably available, we use
+# the ordering of the first few games as an initial approximation.
+# Activity tracking and autosync will replace these estimates later.
+
+def get_recently_played_games(steam_id):
+    games = steam.users.get_user_recently_played_games(steam_id)
+
+    if len(games) == 0:
+        logger.error("User recently played list was not able to be found")
+        return None
+    if games['total_count'] == 0:
+        return None
+
+    return games
+
+def check_steam_game_availability(name):
+    result = steam.apps.search_games(name)
+
+    if len(result['apps']) == 0:
+        return False,None
+    if result['apps'][0]['name'] != name:
+        return False,None
+
+    return True, result['apps'][0]
+    
 
 def print_price():
     title = 2246340
     game = steam.apps.get_app_details(title,None,"price_overview")
     pricef = game['{}'.format(title)]['data']['price_overview']['final_formatted']
     return pricef
+
+def search_for_user(name):
+    user = steam.users.search_user(name)
+    if user == "No match":
+        return 1, None
+
+    if user['player']['communityvisibilitystate'] != 3:
+        return 2, user
+
+    return 0, user
+
 
 def verify_steam_access(steam_id : str):
     user = steam.users.get_user_details(steam_id)
@@ -78,22 +163,43 @@ def verify_steam_access(steam_id : str):
     
     # The user's profile is not private
     if user['player']['communityvisibilitystate'] != 3:
-        return 2, user['player']['personaname']
+        return 2, user
+    # might as well just return the whole user so we can get the profile pic
 
-    return 0, user['player']['personaname']
+    return 0, user
 
-def add_steam_game_library(steam_id : str, conn, cur):
+
+def get_steam_game_library(steam_id : str):
     steam_library = steam.users.get_owned_games(steam_id)
     return steam_library
 
-def get_steam_image(appid : int):
-    details = steam.apps.get_app_details(appid)
-    if details[f'{appid}']['success']:
-        image = details[f'{appid}']['data']['header_image']
-        return image
 
-    return None
+def look_up_steam_image_and_price(appid : int):
+    details = steam.apps.get_app_details(appid)
+    for attempt in range(5):
+        try:
+            if details[f'{appid}']['success']:
+                image = details[f'{appid}']['data']['header_image']
+            else:
+                image = None
+
+            details = steam.apps.get_app_details(appid,None, "price_overview")
+            if details[f'{appid}']['success'] and len(details[f'{appid}']['data']) != 0:
+                price = details[f'{appid}']['data']['price_overview']['initial']
+            else:
+                price = None
+
+            return image, price
+
+        except requests.exceptions.ReadTimeout as e:
+            logger.warning(f"Could not get Steam data for {appid}: {e} on attempt: {attempt}")
+            if attempt < 4:
+                time.sleep(3)
+
+    logger.error(f"Could not get Steam data for {appid}")
+    return None,None
     
-if __name__ == "__main__":
-    link_steam_library(add_steam_game_library("76561198965639452",None,None))
+# if __name__ == "__main__":
+#     pass
+    #link_steam_library(add_steam_game_library("76561198965639452",None))
     #print(add_steam_game_library("76561198965639452",None,None))
