@@ -8,7 +8,8 @@ on_ready()
 1. New users are added to the guild and their profiles will be set up
 
 ## Command to set active channel to send messages/announcements in
-1. /set_channel?
+1. /set_channel? could have a channel for gaming news| level up | weekly stats
+2. Also worth having a happy holidays thing that celebrates holidays
 
 ## Activity monitoring 
 
@@ -29,6 +30,7 @@ on_presence_update()
 
 1. When linking steam will add all the games found to the games list
 2. Auto sync will be on by default unless the user changes their profile settings or unliks their steam
+3. The sync should only update the recently played if the most recent time is older than a day
 3. When user unlinks their steam remove steam id from **users**, remove all **user_games** that haven't been seen from activity monitoring, delete row from **general_steam_data**
 4. User can either link through a custom id url or through steam id
 

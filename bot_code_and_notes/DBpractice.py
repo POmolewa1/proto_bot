@@ -1,13 +1,18 @@
 import psycopg2 as db
 import os 
 from dotenv import load_dotenv
-
 load_dotenv()
 import logging
 from SteamPractice import *
 import datetime as dt
 from datetime import timezone
 from igdbPractice import *
+from enum import Enum
+
+class activity_errors(Enum):
+    NO_CONFLICT = 0
+    SESSION_ALREADY_IN_PROGRESS = 1
+    DIFFERENT_GAME_IN_PROGRESS = 2
 
 logger = logging.getLogger(__name__)
 #conn = db.connect(host= os.getenv("DB_HOST"), dbname=os.getenv("DB_NAME"), user=os.getenv("USER"), password=os.getenv("PASSWORD"),port=os.getenv("PORT"))
@@ -129,7 +134,7 @@ def initialize_db():
 
     cur.execute("""CREATE TABLE IF NOT EXISTS games (
         id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-        game_name VARCHAR(255),
+        game_name VARCHAR(255) UNIQUE,
 
         on_steam BOOLEAN,
         img TEXT,
@@ -146,8 +151,8 @@ def initialize_db():
 
         seen_playing_in_server BOOLEAN DEFAULT FALSE,
         server_hours INT DEFAULT 0,
-        unsyced_hours INT DEFAULT 0,
-        last_time_played INT,
+        unsynced_hours INT DEFAULT 0,
+        last_time_played TIMESTAMPTZ,
         steam_playtime INT
     );
     """)
@@ -196,6 +201,16 @@ def initialize_db():
     """)
     logger.info(f"Verified table: activity_tracker")
 
+    cur.execute("""CREATE TABLE IF NOT EXISTS todays_news (
+        id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        article_title TEXT,
+        gid INT UNIQUE
+    );
+    """)    
+    logger.info(f"Verified table: todays_news")
+
+    # We also want to manually clear the activity tracking table(s) on start up if needed
+
     close_connection(conn,cur)
     print("Database has been successfully initialized")
 
@@ -220,62 +235,258 @@ def game_name_in_database(game_name, cur : db.extensions.cursor):
         return False
     return True
 
+def get_user_id(member_id, cur: db.extensions.cursor):
+    cur.execute(
+        """SELECT id FROM users
+            WHERE users.discord_id = %s
+        """,(member_id,))
+    result = cur.fetchone()
+    return result[0]
+
+
+def get_app_id(gid ,cur : db.extensions.cursor):
+    cur.execute(
+        """SELECT on_steam, steam_app_id FROM games
+            WHERE id = %s
+        """,(gid,)
+    )
+
+    result = cur.fetchone()
+    if result is None:
+        logger.error(f"Could not find a steam_app_id for gid : {gid}")
+        return result
+    if result[0] == False:
+        logger.warning(f"Could not find a steam_app_id for gid : {gid} because it is not on steam")
+        return None
+
+    return result[1]
+
+def process_member_games_into_news(member_id_list, cur : db.extensions.cursor):
+    logger.info(f"Started processing game news for members : {member_id_list}")
+    # for each person in the list get all the games that they played that month
+    # add those games to a list if they are not already added
+    # return all those game ids
+    uid_list = []
+    for member_id in member_id_list:
+        user_id = get_user_id(member_id, cur)
+        uid_list.append(user_id)
+
+    user_lookup = dict(zip(uid_list, member_id_list))
+    news = {}
+
+    cur.execute(
+        """SELECT user_id, game_id, last_time_played FROM user_games
+            WHERE last_time_played IS NOT NULL
+            ORDER BY last_time_played
+        """
+    )
+
+    results = cur.fetchall()
+    if results is None:
+        logger.error("Could not find any recent games to fetch news for")
+        return
+
+    date_cutoff = dt.datetime.now(timezone.utc) - dt.timedelta(weeks = 4)
+    #print(date_cutoff)
+    for result in results:
+        uid = result[0]
+        if uid not in uid_list:
+            continue
+        discord_id = user_lookup[uid]
+        gid = result[1]
+        plytime = result[2]
+        if plytime >= date_cutoff:
+            app_id = get_app_id(gid, cur)
+            if app_id is None:
+                continue
+            if app_id not in news:
+                data = {
+                    'relavent_members' : [],
+                    'news_articles' : []
+                }
+                news[app_id] = data
+                news[app_id]['relavent_members'].append(discord_id)
+            else:
+                news[app_id]['relavent_members'].append(discord_id)
+
+    #print(news)
+    return get_game_news_from_steam(news)
+
+# conn,cur = create_connection()
+# process_member_games_into_news([385277889404207105,938183066948612096],cur)
+# close_connection(conn,cur)
+
+def add_to_todays_news(news_title, gid, cur : db.extensions.cursor):
+    cur.execute(
+        """INSERT INTO todays_news (article_title, gid)
+            VALUES (%s, %s)
+            ON CONFLICT DO NOTHING
+        """,(news_title, gid)
+    )
+
+
+def get_server_time(uid, gid, cur : db.extensions.cursor):
+    cur.execute(
+        """SELECT server_hours FROM user_games
+            WHERE user_id = %s
+            AND game_id = %s
+        """,(uid, gid)
+    )
+
+    result = cur.fetchone()
+
+    if result is None:
+        logger.error(f"Could not find a match for user_id : {uid} and game_id : {gid}")
+        return
+
+    return result[0]
+
+
+def update_user_game_time(total_time, uid, gid, cur : db.extensions.cursor):
+    if total_time is None:
+        total_time = get_server_time(uid, gid, cur)
+        if total_time is None:
+            logger.error(f"Aborting updating user game time because could not find total_time for gid : {gid} and user : {uid}")
+            return
+
+    current_time = dt.datetime.now(tz = timezone.utc)
+
+    cur.execute(
+        """UPDATE user_games
+            SET
+                seen_playing_in_server = %s,
+                server_hours = %s,
+                last_time_played = %s
+            WHERE user_id = %s
+            AND game_id = %s
+        """,(True, total_time, current_time, uid, gid)
+    )
+    
+
+def remove_tracked_game(uid, gid, cur : db.extensions.cursor):
+    cur.execute(
+        """DELETE FROM activity_tracker
+            WHERE user_id = %s
+            AND game_id = %s 
+        """,(uid, gid)
+    )
+
+
+def manually_end_game_session(uid, cur : db.extensions.cursor):
+    logger.info(f"Attempting to end manual tracking on for user : {uid}...")
+
+    cur.execute(
+        """SELECT game_id, start_time FROM activity_tracker
+            WHERE user_id = %s
+        """,(uid,)
+    )
+
+    result = cur.fetchone()
+    if result is None:
+        logger.error(f"Could not manually end session for user {uid}")
+        return
+
+    gid = result[0]
+    start_time = result[1]
+    curr_server_game_time = get_server_time(uid, gid, cur)
+    if curr_server_game_time is None:
+        logger.error(f"Aborting manually ending game session for user : {uid} and game : {gid} because could not find the current server game time")
+        return
+    
+    session_time = (dt.datetime.now(tz = timezone.utc) - start_time).total_seconds()
+
+    total_server_time = session_time + curr_server_game_time
+
+    update_user_game_time(total_server_time, uid, gid, cur)
+    remove_tracked_game(uid, gid, cur)
+
+    logger.info(f"Successfully ended manual tracking on gid : {gid} for user : {uid}...")
+
 
 #This function will find the most recent played game from the game tracker and then return the date before removing the game from the tracker
 def end_game_tracker(member_id, game_name, cur : db.extensions.cursor):
+    logger.info(f"Attempting to end tracking on {game_name} for user : {member_id}...")
+
     uid = get_user_id(member_id, cur)
     gid = get_game_id_from_name(game_name, cur)
+    if uid == None or gid == None:
+        logger.error(f"Ending tracking failed for game : {game_name} and user {member_id} because either uid or gid were not found")
+        return
 
     cur.execute(
         """SELECT start_time FROM activity_tracker
             WHERE user_id = %s
             AND game_id = %s
-        """,(uid, gid))
+        """,(uid, gid)
+    )
     
     result = cur.fetchone()
     if result is None:
         logger.error(f"Could not find data for {game_name} because it does not exist")
         return None
 
-    cur.execute(
-        """DELETE FROM activity_tracker
-            WHERE user_id = %s
-            AND game_id = %s 
-        """,(uid, gid))
+    curr_server_game_time = get_server_time(uid, gid, cur)
+    if curr_server_game_time == None:
+        logger.error(f"Could not find a valid time server time for game : {game_name} and user : {member_id}. Aborting operation")
+        return
     
-    return result[0]
+    time_played = (dt.datetime.now(tz = timezone.utc) - result[0]).total_seconds()
+
+    total_time = curr_server_game_time + time_played
+
+    update_user_game_time(total_time, uid, gid, cur)
+    remove_tracked_game(uid, gid, cur)
+    logger.info(f"Successfully ended tracking on {game_name} for user : {member_id}...")
+    
 
 def check_for_active_game(uid, gid, cur: db.extensions.cursor):
     cur.execute(
-        """SELECT game_id, game_id FROM activity_tracker
+        """SELECT game_id FROM activity_tracker
             WHERE user_id = %s
-        """,(uid,))
+        """,(uid,)
+    )
 
     result = cur.fetchone()
 
     # There are no conflicts tracking a new game
     if result is None:
-        return 0
+        return activity_errors.NO_CONFLICT
     # That game is already being tracked
-    elif result[1] == gid:
-        return 1
+    elif result[0] == gid:
+        return activity_errors.SESSION_ALREADY_IN_PROGRESS
     # There is a differnt game session that ended but wasn't recorded
     else:
-        return 2
+        return activity_errors.DIFFERENT_GAME_IN_PROGRESS
     
 
-def start_game_tracker(member_id, game_name, time : dt.datetime, cur : db.extensions.cursor):
+def start_game_tracker(member_id, game_name, cur : db.extensions.cursor):
+    logger.info(f"Attempting to start tracking {game_name} for user {member_id}...")
+
+    curr_time = dt.datetime.now(timezone.utc)
     uid = get_user_id(member_id, cur)
     gid = get_game_id_from_name(game_name, cur)
+    if uid == None or gid == None:
+        logger.error(f"Game tracking start up for game : {game_name} and user {member_id} failed because either uid or gid were not found")
+        return
 
-    error_code = check_for_active_game(uid, gid, cur)
+    status_code = check_for_active_game(uid, gid, cur)
 
-    if error_code == 2:
-        
+    if status_code == activity_errors.SESSION_ALREADY_IN_PROGRESS:
+        logger.info(f"Tracking was not updated because {game_name} was already being tracked")
+        return
+    
+    if status_code == activity_errors.DIFFERENT_GAME_IN_PROGRESS:
+        logger.info(f"Different game was being tracked. Ending previous tracking for {member_id}")
+        manually_end_game_session(uid, cur)
+
     cur.execute(
         """INSERT INTO activity_tracker (user_id, game_id, start_time)
-            VALUES (%s, %s, %s);
-        """,(uid, gid, time))
+            VALUES (%s, %s, %s)
+            ON CONFLICT DO NOTHING
+        """,(uid, gid, curr_time))
+        
+    update_user_game_time(None, uid, gid, cur)
+    logger.info(f"Finalized tracking start up for game : {game_name} with user : {member_id}")
 
 
 def verify_member_in_database(total_guilds, bot_profile_id, cur : db.extensions.cursor):
@@ -327,7 +538,8 @@ def game_in_db(game_id,cur : db.extensions.cursor):
     cur.execute(
         """SELECT FROM games 
             WHERE games.steam_app_id = %s
-        """,(game_id,))
+        """,(game_id,)
+    )
 
     result = cur.fetchone()
     if result is None:
@@ -341,7 +553,8 @@ def check_for_existing_steam_link(member_id, cur : db.extensions.cursor):
     cur.execute(
         """SELECT account_name FROM general_steam_data
             WHERE user_id = %s;
-        """,(uid,))
+        """,(uid,)
+    )
 
     result = cur.fetchone()
 
@@ -355,7 +568,8 @@ def get_game_id_from_name(game_name, cur : db.extensions.cursor):
     cur.execute(
         """SELECT id FROM games
             WHERE game_name = %s
-        """,(game_name,))
+        """,(game_name,)
+    )
 
     result = cur.fetchone()
 
@@ -384,21 +598,13 @@ def get_discord_username(discord_id, cur : db.extensions.cursor):
         """SELECT user_name FROM users
             WHERE discord_id = %s 
         """,(discord_id,))
-
+    
     result = cur.fetchone()
     if result is not None:
         return result[0]
     else:
         return "User not found"
     
-def get_user_id(member_id, cur: db.extensions.cursor):
-    cur.execute(
-        """SELECT id FROM users
-            WHERE users.discord_id = %s
-        """,(member_id,))
-    result = cur.fetchone()
-    return result[0]
-
 
 def get_steam_name(member_id, cur : db.extensions.cursor):
     uid = get_user_id(member_id,cur)
@@ -439,10 +645,14 @@ def get_total_steam_time(member_id, cur : db.extensions.cursor):
 
     result = cur.fetchall()
 
+    if result is None:
+        logger.error(f"Could not find steam time for user {uid}")
+        return
     total = 0 
     for time_list in result:
         time = time_list[0]
-        total += time
+        if time != None:
+            total += time
 
     return total
 
@@ -466,6 +676,21 @@ def get_total_library_cost(member_id, cur : db.extensions.cursor):
     return total
 
 
+def add_game_to_user_profile(game_name, member_id, cur : db.extensions.cursor):
+    logger.info(f"Adding {game_name} to user : {member_id} profile")
+    uid = get_user_id(member_id, cur)
+    gid = get_game_id_from_name(game_name, cur)
+    if gid == None or uid == None:
+        logger.error(f"Aborting adding {game_name} to user : {member_id} profile because either uid or gid were not found")
+        return
+    
+    cur.execute(
+        """INSERT INTO user_games (user_id, game_id, seen_playing_in_server)
+            VALUES(%s,%s,%s)
+        """,(uid, gid, True)
+    )
+
+    
 def add_game_to_database(name, IGDBClient : IGDBClient , cur : db.extensions.cursor):
     logger.info(f"Attempting to add {name} to the database...")
     on_steam, steam_game_data = check_steam_game_availability(name)
@@ -476,14 +701,17 @@ def add_game_to_database(name, IGDBClient : IGDBClient , cur : db.extensions.cur
         cur.execute(
             """INSERT INTO games (game_name, on_steam, img)
                 VALUES(%s,%s,%s)
+                ON CONFLICT DO NOTHING 
             """,(name, on_steam, img))
     else:
         logger.info(f"{name} is on Steam. Updating from Steam client")
-        steam_app_id = steam_game_data['id']
+        steam_app_id = steam_game_data['id'][0]
         img, price = look_up_steam_image_and_price(steam_app_id)
+        # Add an on conflict thing here
         cur.execute(
             """INSERT INTO games (game_name, on_steam, img, steam_app_id, steam_price)
                 VALUES(%s,%s,%s,%s,%s)
+                ON CONFLICT DO NOTHING 
             """,(name, on_steam, img, steam_app_id, price))
 
 
@@ -496,9 +724,68 @@ def add_game_to_database_from_steam(game_data, cur : db.extensions.cursor):
     cur.execute(
         """INSERT INTO games (game_name, on_steam, img, steam_app_id, steam_price)
             VALUES(%s,%s,%s,%s,%s)
+            ON CONFLICT DO NOTHING
         """,(name, on_steam, img, gid, price))
 
+
+# Game can be updated if it is in the database and part of the user's profile
+def check_if_game_is_updatable(game, uid, cur : db.extensions.cursor):
+    if not game_in_db(game['appid'], cur):
+        logger.error(f"Game : {game} could not be found in the data base. Could not update user: {uid} recently played")
+        return False
+
+    gid = get_game_id_from_name(game['name'],cur)
+
+    cur.execute(
+        """SELECT id, last_time_played FROM user_games
+            WHERE user_id = %s
+            AND game_id = %s
+        """,(uid, gid)
+    )
+
+    result = cur.fetchone()
+    if result is None:
+        logger.error(f"Could not find {game['name']} data in user : {uid} profile")
+        return False
+
+    time_limit = dt.datetime.now(timezone.utc) - dt.timedelta(days=1)
+    if result[1] != None and result[1] >= time_limit:
+        return False
+
+    return True
+
+# A majority of profiles do not have the exact time recent games were played
+# To mitigate this issue we assume that each game in the user's recenlty played list was played on a different day
+# Over time these values will become more accurate through regular activity monitoring 
+def update_user_recently_played(uid, steam_id, cur : db.extensions.cursor):
+    # only update if value is older than the last two weeks or none
+    games = get_recently_played_games(steam_id)
+    if games is None:
+        return
+
+    today = dt.datetime.now(timezone.utc)
+    date = today
+    recency_scaling = dt.timedelta(days = 1)
+    for game in games['games']:
+        if check_if_game_is_updatable(game, uid, cur):
     
+            gid = get_game_id_from_name(game['name'], cur)
+
+            cur.execute(
+                """UPDATE user_games
+                    SET
+                        last_time_played = %s
+                    WHERE user_id = %s
+                    AND game_id = %s
+                """,(date, uid, gid)
+            )
+            new_date = date - recency_scaling
+            # Recently played gives the games played within a 14 day period
+            # If the user has played over 14 different games we want to make sure we don't scale past our 14 day period
+            if (today - new_date).days < 14:
+                date = new_date
+
+ 
 def link_steam_library(library_data : dict, steam_profile_data : dict, member_id : int, cur : db.extensions.cursor):
     #conn,cur = create_connection()
 
@@ -551,11 +838,14 @@ def link_steam_library(library_data : dict, steam_profile_data : dict, member_id
     creation_time = steam_profile_data['player']['timecreated']
     total_library_cost = get_total_library_cost(member_id, cur)
     total_steam_time = get_total_steam_time(member_id, cur)
+    if total_steam_time is None:
+        total_steam_time = 0
     cur.execute(
         """INSERT INTO general_steam_data (user_id, steam_id, account_name, account_age, steam_games_count, account_cost, total_steam_time)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
         """,(uid, steam_id, steam_name, creation_time, game_count, total_library_cost, total_steam_time))
 
+    update_user_recently_played(uid, steam_id, cur)
     # INSERT INTO games (steam_app_id, game_name, image_url)
     # VALUES (%s, %s, %s)
     # ON CONFLICT (steam_app_id) DO NOTHING;

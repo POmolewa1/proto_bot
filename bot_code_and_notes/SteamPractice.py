@@ -104,6 +104,11 @@ title = 930210
 # user = steam.users.get_user_recently_played_games("76561198965639452")
 # print(user)
 
+# user = steam.users.get_owned_games("76561198965639452")
+# for game in user['games']:
+#     if game['name'] == "hololive Dreams":
+#         print(game)
+
 # tday = dt.datetime.now(tz = timezone.utc)
 # subtract = dt.timedelta(days=1)
 # print(tday - subtract)
@@ -111,10 +116,46 @@ title = 930210
 # game_info = steam.apps.search_games("Warhammer: Vermintide 2")
 # print(game_info['apps'][0])
 
+# date = dt.datetime.now(timezone.utc)
+# recency_scaling = dt.timedelta(days = 3)
+
+# d = date - recency_scaling
+# print((date - d).days)
+
 # Steam only exposes recently played games for a limited period.
 # Since exact last-played dates aren't reliably available, we use
 # the ordering of the first few games as an initial approximation.
 # Activity tracking and autosync will replace these estimates later.
+
+
+def get_game_news_from_steam(appid_user_dictionary):
+    # need to return a dictionary of games to news like| Helldivers 2(id= 33333) : news(dictionary) |
+    logger.info("Started looking for relevent news from Steam client")
+    today = dt.datetime.now(timezone.utc)
+    date_cutoff = today - dt.timedelta(days=10)
+    for appid in appid_user_dictionary:
+        url = f"https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/?appid={appid}&maxlength=150&count=5"
+        request = requests.get(url)
+        news = request.json()
+        if news is None:
+            logger.info(f"No news found for appid : {appid}")
+            continue
+
+        for artice in news['appnews']['newsitems']:
+            article_timestamp = artice['date']
+            article_date = dt.datetime.fromtimestamp(article_timestamp, timezone.utc)
+            feed_type = artice['feed_type']
+            if article_date <= date_cutoff:
+                break
+            # also have to check if it has not already been mentioned within the last 24 hours
+            if feed_type == 1:
+                appid_user_dictionary[appid]['news_articles'].append(artice['url'])
+
+    logger.info(f"All relevant news has been recorded : {appid_user_dictionary}")
+    return appid_user_dictionary
+
+
+#get_game_news(1)
 
 def get_recently_played_games(steam_id):
     games = steam.users.get_user_recently_played_games(steam_id)
