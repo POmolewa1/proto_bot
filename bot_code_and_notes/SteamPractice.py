@@ -220,7 +220,8 @@ def look_up_steam_image_and_price(appid : int):
     if details is None:
         for attempt in range(5):
             logger.warning(f"Could not get app info for appid : {appid} on try : {attempt}")
-            time.sleep(2)
+            time.sleep(60)
+            print(f"sleep on attempt {attempt}")
             details = steam.apps.get_app_details(appid)
             if details is not None:
                 break
