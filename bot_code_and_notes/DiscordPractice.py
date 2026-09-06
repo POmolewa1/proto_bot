@@ -267,22 +267,22 @@ async def guildcard(interaction: discord.Interaction, user: discord.Member):
 @client.tree.command(name = "link_steam_with_steam_id", description = "Links your public steam data to your guild profile.", guild = GUILD_ID)
 async def link_steam_id(interaction : discord.Interaction, steam_id : str):
     view = ConfirmDeny(interaction.user.id)
+    await interaction.response.defer()
     error_code, user_profile = verify_linking_criteria(interaction.user.id, steam_id)
 
     match error_code:
         case 0:
-            await interaction.response.defer()
             print(f"Found profile : {user_profile['player']['personaname']}")
             sample_profile = SampleDiscordProfile(user_profile)
             await interaction.followup.send(f"Found profile : {user_profile['player']['personaname']}\nWould you like me to link this to your guild profile?", embed=sample_profile,view=view)
         case 1:
-            await interaction.response.send_message(f"Hmm, I couldn't find a Steam profile with that ID. Could you double-check that you entered the correct numbers and try again?")
+            await interaction.followup.send(f"Hmm, I couldn't find a Steam profile with that ID. Could you double-check that you entered the correct numbers and try again?")
             return
         case 2:
-            await interaction.response.send_message(f"I found your Steam profile, but it looks like it's set to private. Could you go into your Steam profile settings and make sure it's set to public? Once you've done that, try again!")
+            await interaction.followup.send(f"I found your Steam profile, but it looks like it's set to private. Could you go into your Steam profile settings and make sure it's set to public? Once you've done that, try again!")
             return
         case 3:
-            await interaction.response.send_message(f"Mmm, I just checked and it looks like you already have a Steam profile linked ({user_profile}).\n\nIf you'd like to link a different Steam profile, just use /unlink_steam_data first, then come back and use this command again!")
+            await interaction.followup.send(f"Mmm, I just checked and it looks like you already have a Steam profile linked ({user_profile}).\n\nIf you'd like to link a different Steam profile, just use /unlink_steam_data first, then come back and use this command again!")
             return
 
     await view.wait()

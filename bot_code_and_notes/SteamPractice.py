@@ -218,6 +218,13 @@ def get_steam_game_library(steam_id : str):
 def look_up_steam_image_and_price(appid : int):
     details = steam.apps.get_app_details(appid)
     if details is None:
+        for attempt in range(5):
+            logger.warning(f"Could not get app info for appid : {appid} on try : {attempt}")
+            time.sleep(2)
+            details = steam.apps.get_app_details(appid)
+            if details is not None:
+                break
+    if details is None:
         return None, None
     
     for attempt in range(5):
