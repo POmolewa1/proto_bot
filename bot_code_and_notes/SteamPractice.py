@@ -217,6 +217,9 @@ def get_steam_game_library(steam_id : str):
 
 def look_up_steam_image_and_price(appid : int):
     details = steam.apps.get_app_details(appid)
+    if details is None:
+        return None, None
+    
     for attempt in range(5):
         try:
             if details[f'{appid}']['success']:
@@ -225,6 +228,8 @@ def look_up_steam_image_and_price(appid : int):
                 image = None
 
             details = steam.apps.get_app_details(appid,None, "price_overview")
+            if details is None:
+                return image, None
             if details[f'{appid}']['success'] and len(details[f'{appid}']['data']) != 0:
                 price = details[f'{appid}']['data']['price_overview']['initial']
             else:
