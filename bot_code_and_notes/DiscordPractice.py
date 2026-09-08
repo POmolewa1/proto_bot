@@ -81,7 +81,7 @@ class SampleDiscordProfile(discord.Embed):
         self.set_image(url=profile_details['player']['avatarfull'])
 
 class Client(commands.Bot):
-    e = Embedding("https://cdn.discordapp.com/avatars/385277889404207105/fb8b1cae3be44ba623caee0610343864.png?size=1024")
+    #e = Embedding("https://cdn.discordapp.com/avatars/385277889404207105/fb8b1cae3be44ba623caee0610343864.png?size=1024")
     async def on_ready(self):
         print(f"Logged on as {self.user}")
         
@@ -118,7 +118,6 @@ class Client(commands.Bot):
     
     # When the user changes their status the activity will be updated so after activity will need to check if there is a game that is currently being tracked
     async def on_presence_update(self, before: discord.Member, after: discord.Member):
-
         # Might be better to add the game to the db and then enrich it for tracking purposes
         if after.activity == None and before.activity == None:
             return
@@ -127,9 +126,9 @@ class Client(commands.Bot):
         if before.activity != None:
             if before.activity.type == discord.ActivityType.playing:
                 game = before.activity.name
+
+                await asyncio.to_thread(end_game_tracking_process, before.id, game)
                 end_time = dt.datetime.now(timezone.utc)
-            
-        
                 print(f"{before.display_name} has stopped playing {game} at {end_time}")
                 #print(f"played for {(end_time - start_time).total_seconds()} seconds")
 
@@ -137,8 +136,9 @@ class Client(commands.Bot):
         if after.activity != None:
             if after.activity.type == discord.ActivityType.playing:
                 game = after.activity.name
-                
+                start_time = dt.datetime.now(timezone.utc)
                 await asyncio.to_thread(start_game_tracking_process, game, after)
+                print(f"{after.display_name} has started playing {game} at {start_time}")
 
         # channel = self.get_channel(int(os.getenv("CHANNEL2_ID")))
         # if channel:
@@ -165,6 +165,17 @@ class Client(commands.Bot):
 
     async def create_new_member_profile(interaction : discord.Interaction, steam_id : str):
         pass
+
+    async def on_voice_state_update(self, member:discord.Member, before : discord.member.VoiceState, after : discord.member.VoiceState):
+        # This will handle streaming time and voice enter time
+        # Ending a call will also need to end any streams
+        # We are looking for going from channel to no channel
+        print(member.display_name)
+        #print(type(before))
+        print(before)
+        #print(type(after))
+        print(after)
+        
 
 
 # Bot command helpers
@@ -197,18 +208,25 @@ def create_response(url, user_list):
             message = f"Hey {members} \n I saw you guys playing this game recently and thought you might like to see this \n {url}"
             return message
 
+def end_game_tracking_process(member_id, game_name):
+    conn ,cur = create_connection()
+    end_tracker(member_id, game_name, "PLAYING", cur)
+    close_connection(conn,cur)
+
+
 def start_game_tracking_process(game, after : discord.Member):
     conn,cur = create_connection()
+    # Immediatly update the game and user profiles with the new data if data not found
     if not game_name_in_database(game, cur):
         add_game_to_database(game, igdbclient, cur)
         add_game_to_user_profile(game, after.id, cur)
-    close_connection(conn,cur)
+        conn.commit()
+    if not user_owns_game(after.id, game, cur):
+        add_game_to_user_profile(game, after.id, cur)
+        conn.commit()
 
-    # Need to make sure to add the game to the user's guild profile
-    # If there is something already in the tracker maybe wait a few seconds and then test again and then replace
-    conn,cur = create_connection()
     #gid = get_game_id_from_name(game, cur)
-    start_game_tracker(after.id, game, cur)
+    start_activity_tracker(after.id, game, "PLAYING", cur)
     close_connection(conn,cur)
     #print(f"{after.display_name} has started to play {game} at {self.start_time}")
     start_time = dt.datetime.now(timezone.utc)
@@ -230,7 +248,7 @@ def linking_process(user_profile, interaction):
     conn,cur = create_connection()
     logging.info(f"Getting the game library from {user_profile['player']['personaname']}")
     game_library = get_steam_game_library(user_profile['player']['steamid'])
-    link_steam_library(game_library, user_profile, interaction.user.id, cur)
+    link_steam_library(game_library, user_profile, interaction.user.id, cur, conn)
     close_connection(conn,cur)
 
 
@@ -264,46 +282,58 @@ async def guildcard(interaction: discord.Interaction, user: discord.Member):
         #     await interaction.response.send_message(f"That is not your profile")
         # else:
 
+syncing_users = set()
+
 @client.tree.command(name = "link_steam_with_steam_id", description = "Links your public steam data to your guild profile.", guild = GUILD_ID)
 async def link_steam_id(interaction : discord.Interaction, steam_id : str):
-    view = ConfirmDeny(interaction.user.id)
-    await interaction.response.defer()
-    error_code, user_profile = verify_linking_criteria(interaction.user.id, steam_id)
-
-    match error_code:
-        case 0:
-            print(f"Found profile : {user_profile['player']['personaname']}")
-            sample_profile = SampleDiscordProfile(user_profile)
-            await interaction.followup.send(f"Found profile : {user_profile['player']['personaname']}\nWould you like me to link this to your guild profile?", embed=sample_profile,view=view)
-        case 1:
-            await interaction.followup.send(f"Hmm, I couldn't find a Steam profile with that ID. Could you double-check that you entered the correct numbers and try again?")
-            return
-        case 2:
-            await interaction.followup.send(f"I found your Steam profile, but it looks like it's set to private. Could you go into your Steam profile settings and make sure it's set to public? Once you've done that, try again!")
-            return
-        case 3:
-            await interaction.followup.send(f"Mmm, I just checked and it looks like you already have a Steam profile linked ({user_profile}).\n\nIf you'd like to link a different Steam profile, just use /unlink_steam_data first, then come back and use this command again!")
-            return
-
-    await view.wait()
-    
-    if not view.confirmed:
+    if interaction.user.id in syncing_users:
+        await interaction.response.send_message("Woah there buddy. It seems like you are already syncing a profile right now. Don't worry I'll be done soon")
         return
+    discord_id = interaction.user.id
+    syncing_users.add(discord_id)
 
-    interaction = view.message
+    await interaction.response.defer()
 
-    if lock.locked():
-        await interaction.message.edit(content="Looks like someone is currently syncing right now. Don't worry I'll get to you in a bit as soon as I finish up with them",embed=None,view=None)
+    view = ConfirmDeny(interaction.user.id)
+    error_code, user_profile = await asyncio.to_thread(verify_linking_criteria, discord_id, steam_id)
 
-    async with lock:
-        await interaction.message.edit(content="Syncing now. This might take a minute but I'll let you know when I'm finished",embed=None,view=None)
-        await asyncio.to_thread(linking_process, user_profile, interaction)
+    try:
+        match error_code:
+            case 0:
+                print(f"Found profile : {user_profile['player']['personaname']}")
+                sample_profile = SampleDiscordProfile(user_profile)
+                await interaction.followup.send(f"Found profile : {user_profile['player']['personaname']}\nWould you like me to link this to your guild profile?", embed=sample_profile,view=view)
+            case 1:
+                await interaction.followup.send(f"Hmm, I couldn't find a Steam profile with that ID. Could you double-check that you entered the correct numbers and try again?")
+                return
+            case 2:
+                await interaction.followup.send(f"I found your Steam profile, but it looks like it's set to private. Could you go into your Steam profile settings and make sure it's set to public? Once you've done that, try again!")
+                return
+            case 3:
+                await interaction.followup.send(f"Mmm, I just checked and it looks like you already have a Steam profile linked ({user_profile}).\n\nIf you'd like to link a different Steam profile, just use /unlink_steam_data first, then come back and use this command again!")
+                return
 
-    # I could also print the steam profile card here
-    # we need to implement the syncing 
-    # The sync should only update the recently played if the most recent time is older than a day
-    
-    await interaction.message.edit(content=f"Alright {interaction.user.mention}, I have fully linked your Profile : {user_profile['player']['personaname']} to the guild")
+        await view.wait()
+        
+        if not view.confirmed:
+            return
+
+        interaction = view.message
+
+        if lock.locked():
+            await interaction.message.edit(content="Looks like someone is currently syncing right now. Don't worry I'll get to you in a bit as soon as I finish up with them",embed=None,view=None)
+
+        async with lock:
+            # maybe add a data base look up here to see if the user has a steam profile already
+            await interaction.message.edit(content="Syncing now. This might take a minute but I'll let you know when I'm finished",embed=None,view=None)
+            await asyncio.to_thread(linking_process, user_profile, interaction)
+
+        # I could also print the steam profile card here
+        # we need to implement the syncing 
+        # The sync should only update the recently played if the most recent time is older than a day
+        await interaction.message.edit(content=f"Alright {interaction.user.mention}, I have fully linked your Profile : {user_profile['player']['personaname']} to the guild")
+    finally:
+        syncing_users.discard(discord_id)
 
 
 @client.tree.command(name = "unlink_steam_data", description = "removes all data associated with your steam accound", guild=GUILD_ID)

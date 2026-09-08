@@ -152,6 +152,7 @@ def get_game_news_from_steam(appid_user_dictionary):
                 appid_user_dictionary[appid]['news_articles'].append(artice['url'])
 
     logger.info(f"All relevant news has been recorded : {appid_user_dictionary}")
+    # print(appid_user_dictionary)
     return appid_user_dictionary
 
 
