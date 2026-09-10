@@ -13,6 +13,7 @@ class activity_errors(Enum):
     NO_CONFLICT = 0
     SESSION_ALREADY_IN_PROGRESS = 1
     DIFFERENT_GAME_IN_PROGRESS = 2
+    STREAM_IN_PROGRESS = 3
 
 logger = logging.getLogger(__name__)
 #conn = db.connect(host= os.getenv("DB_HOST"), dbname=os.getenv("DB_NAME"), user=os.getenv("USER"), password=os.getenv("PASSWORD"),port=os.getenv("PORT"))
@@ -121,10 +122,7 @@ def initialize_db():
     cur.execute("""CREATE TABLE IF NOT EXISTS users (
         id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
         discord_id BIGINT UNIQUE NOT NULL,
-        user_name VARCHAR(255),
-
-        total_gaming_hours INT DEFAULT 0,
-        total_streamed_hours INT DEFAULT 0
+        user_name VARCHAR(255)
 
     );
     """)
@@ -132,8 +130,13 @@ def initialize_db():
 
     cur.execute("""CREATE TABLE IF NOT EXISTS guilds_users (
         id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-        guild_id INT REFERENCES guilds(id),
+        guild_id BIGINT REFERENCES guilds(guild_id),
         user_id INT REFERENCES users(id),
+
+        total_messages_sent INT DEFAULT 0,
+        messages_sent_this_week INT DEFAULT 0,
+        total_stream_time INT DEFAULT 0,
+        total_call_time INT DEFAULT 0,
 
         guild_level INT DEFAULT 1,
         xp INT DEFAULT 0
@@ -180,7 +183,7 @@ def initialize_db():
         account_cost INT,
         total_steam_time INT,
         auto_sync_steam BOOLEAN,
-        last_sync INT
+        last_sync TIMESTAMPTZ
     );
     """)
     logger.info(f"Verified table: general_steam_data")
@@ -204,6 +207,18 @@ def initialize_db():
     """)    
     logger.info(f"Verified table: todays_news")
 
+    cur.execute("""CREATE TABLE IF NOT EXISTS server_log (
+        id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+
+        guild_id BIGINT,
+        user_id INT REFERENCES users(id),
+        game_id INT REFERENCES games(id),
+        activity_type VARCHAR(255),
+        activity_time INT,
+
+        start_time TIMESTAMPTZ
+    );
+    """)
     # We also want to manually clear the activity tracking table(s) on start up if needed
 
     close_connection(conn,cur)
@@ -389,7 +404,16 @@ def update_user_game_time(total_time, uid, gid, cur : db.extensions.cursor):
             AND game_id = %s
         """,(True, total_time, current_time, uid, gid)
     )
-    
+
+
+def remove_tracked_activity(uid, activity_type, cur : db.extensions.cursor):
+    cur.execute(
+        """DELETE FROM activity_tracker
+            WHERE user_id = %s
+            AND activity_type = %s 
+        """,(uid, activity_type)
+    )
+
 
 def remove_tracked_game(uid, gid, cur : db.extensions.cursor):
     cur.execute(
@@ -399,15 +423,70 @@ def remove_tracked_game(uid, gid, cur : db.extensions.cursor):
         """,(uid, gid)
     )
 
+def update_guilds_users_total_time(uid, guild_id, activity_type, session_time, cur : db.extensions.cursor):
+    if activity_type == "IN CALL":
+        cur.execute(
+            """SELECT total_call_time FROM guilds_users
+                WHERE user_id = %s
+                AND guild_id = %s
+            """,(uid, guild_id)
+            )
+        result = cur.fetchone()
+        if result is None:
+            logger.error(f"Could not find a user : {uid} tied to a guild : {guild_id} to update total {activity_type}")
+            return
+        
+        old_total = result[0]
+        new_total = old_total + session_time
 
-def manually_end_game_session(uid, cur : db.extensions.cursor):
+        cur.execute(
+            """UPDATE guilds_users
+                SET
+                    total_call_time = %s
+                WHERE user_id = %s
+                AND guild_id = %s
+            """,(new_total, uid, guild_id)
+        )
+
+    if activity_type == "STREAMING":
+        cur.execute(
+            """SELECT total_stream_time FROM guilds_users
+                WHERE user_id = %s
+                AND guild_id = %s
+            """,(uid, guild_id)
+            )
+        result = cur.fetchone()
+        if result is None:
+            logger.error(f"Could not find a user : {uid} tied to a guild : {guild_id} to update total {activity_type}")
+            return
+        
+        old_total = result[0]
+        new_total = old_total + session_time
+
+        cur.execute(
+            """UPDATE guilds_users
+                SET
+                    total_stream_time = %s
+                WHERE user_id = %s
+                AND guild_id = %s
+            """,(new_total, uid, guild_id)
+        )
+
+
+def add_to_server_log(uid, gid, activity_type, guild_id, activity_time, start_time, cur : db.extensions.cursor):
+    cur.execute(
+        """INSERT INTO server_log (guild_id, user_id, game_id, activity_type, activity_time, start_time)
+            VALUES (%s,%s,%s,%s,%s,%s)
+        """,(guild_id, uid, gid, activity_type, activity_time, start_time)
+    )
+
+def manually_end_game_session(uid, guild_id, activity_type, cur : db.extensions.cursor):
     logger.info(f"Attempting to end manual tracking on for user : {uid}...")
-    a_type = "PLAYING"
     cur.execute(
         """SELECT game_id, start_time FROM activity_tracker
             WHERE user_id = %s
             AND activity_type = %s
-        """,(uid, a_type)
+        """,(uid, activity_type)
     )
 
     result = cur.fetchone()
@@ -428,10 +507,13 @@ def manually_end_game_session(uid, cur : db.extensions.cursor):
 
     update_user_game_time(total_server_time, uid, gid, cur)
     remove_tracked_game(uid, gid, cur)
+    add_to_server_log(uid, gid, activity_type, guild_id, session_time, start_time, cur)
 
-    logger.info(f"Successfully ended manual tracking on gid : {gid} for user : {uid}...")
+    logger.info(f"Successfully recorded manual tracking on gid : {gid} for user : {uid} with a total of {session_time} seconds...")
 
-def end_game_tracker(member_id, game_name, cur : db.extensions.cursor):
+
+def end_game_tracker(member_id, game_name, activity_type, guild_id, cur : db.extensions.cursor):
+
     uid = get_user_id(member_id, cur)
     gid = get_game_id_from_name(game_name, cur)
     if uid == None or gid == None:
@@ -447,82 +529,194 @@ def end_game_tracker(member_id, game_name, cur : db.extensions.cursor):
     
     result = cur.fetchone()
     if result is None:
-        logger.error(f"Could not find data for {game_name} because it does not exist")
-        return None
+        logger.error(f"Could not find start time for {game_name} because it does not exist")
+        return
 
-    curr_server_game_time = get_server_time(uid, gid, cur)
-    if curr_server_game_time == None:
+    time_in_game = get_server_time(uid, gid, cur)
+    if time_in_game == None:
         logger.error(f"Could not find a valid time server time for game : {game_name} and user : {member_id}. Aborting operation")
         return
 
     today = dt.datetime.now(tz = timezone.utc)
-    time_played = (today - result[0]).total_seconds()
-
-    total_time = curr_server_game_time + time_played
+    start_time = result[0]
+    time_played = (today - start_time).total_seconds()
+    # Make sure to add a tracking limit here maybe 12 hours?
+    total_time = time_in_game + time_played
 
     update_user_game_time(total_time, uid, gid, cur)
     remove_tracked_game(uid, gid, cur)
+    add_to_server_log(uid, gid, activity_type, guild_id, time_played, start_time, cur)
     logger.info(f"Successfully ended tracking on {game_name} for user : {member_id} at time : {today}...")
-    # also will want to add this data to the server log
+# also will want to add this data to the server log
 
 
-def end_tracker(member_id, game_name, activity_type : str, cur : db.extensions.cursor):
-
-    if activity_type == "PLAYING":
-        logger.info(f"Attempting to end tracking on {game_name} for user : {member_id}...")
-        end_game_tracker(member_id, game_name, cur)
-          
-
-def check_for_active_game(uid, gid, cur: db.extensions.cursor):
-    a_type = "PLAYING"
+def end_voice_tracker(member_id, activity_type, guild_id, cur : db.extensions.cursor):
+    uid = get_user_id(member_id, cur)
     cur.execute(
-        """SELECT game_id FROM activity_tracker
+        """SELECT start_time FROM activity_tracker
             WHERE user_id = %s
             AND activity_type = %s
-        """,(uid,a_type)
+        """,(uid, activity_type)
     )
 
     result = cur.fetchone()
+    if result is None:
+        logger.error(f"Could not find start time for activity_type : {activity_type} because it does not exist")
+        return 
 
-    # There are no conflicts tracking a new game
+    today = dt.datetime.now(tz = timezone.utc)
+    start_time = result[0]
+    time_tracked = (today - start_time).total_seconds()
+    # Total time for streaming and call will be in guilds_users
+
+    if activity_type == "IN CALL":
+        error_status = check_for_activity(uid, None, activity_type, cur)
+        if error_status == activity_errors.STREAM_IN_PROGRESS:
+            end_voice_tracker(member_id, "STREAMING", guild_id, cur)
+        print(f"In call for {time_tracked} seconds")
+    else:
+        print(f"Streaming for {time_tracked} seconds")
+
+    update_guilds_users_total_time(uid, guild_id, activity_type, time_tracked, cur)
+    add_to_server_log(uid, None, activity_type, guild_id, time_tracked, start_time, cur)
+    remove_tracked_activity(uid, activity_type, cur)
+    logger.info(f"Successfully recorded activity : {activity_type} with user : {member_id} with a total of {time_tracked} seconds")
+
+def end_tracker(member_id, game_name, activity_type : str, guild_id, cur : db.extensions.cursor):
+
+    if activity_type == "PLAYING":
+        logger.info(f"Attempting to end tracking on {game_name} for user : {member_id}...")
+        end_game_tracker(member_id, game_name, activity_type, guild_id, cur)
+    else:
+        logger.info(f"Attempting to end tracking on activity : {activity_type} for user : {member_id}...")
+        end_voice_tracker(member_id, activity_type, guild_id, cur)
+          
+
+def check_for_activity(uid, gid, activity_type, cur: db.extensions.cursor):
+    if activity_type == "PLAYING":
+        cur.execute(
+            """SELECT game_id FROM activity_tracker
+                WHERE user_id = %s
+                AND activity_type = %s
+            """,(uid, activity_type)
+        )
+
+        result = cur.fetchone()
+
+        # There are no conflicts tracking a new game
+        if result is None:
+            return activity_errors.NO_CONFLICT
+        # That game is already being tracked
+        elif result[0] == gid:
+            return activity_errors.SESSION_ALREADY_IN_PROGRESS
+        # There is a differnt game session that ended but wasn't recorded
+        else:
+            return activity_errors.DIFFERENT_GAME_IN_PROGRESS
+
+    # This section is for the case when we need to end an IN CALL activity but need
+    # to know if there is a STREAMING activity for the user so we can end that as well
+    activity = "STREAMING"
+    cur.execute(
+        """SELECT * FROM activity_tracker
+            WHERE user_id = %s
+            AND activity_type = %s
+        """,(uid, activity)
+    )
+    result = cur.fetchone()
     if result is None:
         return activity_errors.NO_CONFLICT
-    # That game is already being tracked
-    elif result[0] == gid:
-        return activity_errors.SESSION_ALREADY_IN_PROGRESS
-    # There is a differnt game session that ended but wasn't recorded
     else:
-        return activity_errors.DIFFERENT_GAME_IN_PROGRESS
-    
+        return activity_errors.STREAM_IN_PROGRESS
 
-def start_activity_tracker(member_id : int, game_name : str, activity_type : str, cur : db.extensions.cursor):
-    logger.info(f"Attempting to start tracking {game_name} for user {member_id}...")
 
-    curr_time = dt.datetime.now(timezone.utc)
+def start_activity_tracker(member_id : int, game_name : str, activity_type : str, guild_id, cur : db.extensions.cursor):
+
     uid = get_user_id(member_id, cur)
-    gid = get_game_id_from_name(game_name, cur)
-    if uid == None or gid == None:
-        logger.error(f"Game tracking start up for game : {game_name} and user {member_id} failed because either uid or gid were not found")
-        return
+    curr_time = dt.datetime.now(timezone.utc)
 
-    status_code = check_for_active_game(uid, gid, cur)
+    if activity_type == "PLAYING":
+        logger.info(f"Attempting to start tracking {game_name} for user {member_id}...")
 
-    if status_code == activity_errors.SESSION_ALREADY_IN_PROGRESS:
-        logger.info(f"Tracking was not updated because {game_name} was already being tracked")
+        gid = get_game_id_from_name(game_name, cur)
+        if uid == None or gid == None:
+            logger.error(f"Game tracking start up for game : {game_name} and user {member_id} failed because either uid or gid were not found")
+            return
+
+        status_code = check_for_activity(uid, gid, activity_type, cur)
+
+        if status_code == activity_errors.SESSION_ALREADY_IN_PROGRESS:
+            logger.info(f"Tracking was not updated because {game_name} was already being tracked")
+            return
+        
+        if status_code == activity_errors.DIFFERENT_GAME_IN_PROGRESS:
+            logger.info(f"Different game was being tracked. Ending previous tracking for {member_id}")
+            manually_end_game_session(uid, guild_id, activity_type, cur)
+
+        cur.execute(
+            """INSERT INTO activity_tracker (user_id, game_id, activity_type, start_time)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT DO NOTHING
+            """,(uid, gid, activity_type, curr_time))
+            
+        update_user_game_time(None, uid, gid, cur)
+        logger.info(f"Finalized tracking start up for game : {game_name} with user : {member_id}")
         return
     
-    if status_code == activity_errors.DIFFERENT_GAME_IN_PROGRESS:
-        logger.info(f"Different game was being tracked. Ending previous tracking for {member_id}")
-        manually_end_game_session(uid, cur)
+    if activity_type == "IN CALL":
+        logger.info(f"Attempting to start tracking time in call for user {member_id}...")
+    if activity_type == "STREAMING":
+        logger.info(f"Attempting to start tracking streaming time for user {member_id}...")
+
+    # I'm thinking on starting a call I would need to check if we are also tracking a stream and if so we need to end it 
+    # We need to do the same thing on stream end
 
     cur.execute(
-        """INSERT INTO activity_tracker (user_id, game_id, activity_type, start_time)
-            VALUES (%s, %s, %s, %s)
-            ON CONFLICT DO NOTHING
-        """,(uid, gid, activity_type, curr_time))
-        
-    update_user_game_time(None, uid, gid, cur)
-    logger.info(f"Finalized tracking start up for game : {game_name} with user : {member_id}")
+        """INSERT INTO activity_tracker (user_id, activity_type, start_time)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (user_id, activity_type) DO NOTHING
+        """,(uid, activity_type, curr_time))
+    logger.info(f"Tracking for activity : {activity_type} started sucessfully")
+
+
+def add_member_to_guilds_users_database(member, guild_id, cur : db.extensions.cursor):
+    uid = get_user_id(member.id, cur)
+    cur.execute(
+        """SELECT * FROM guilds_users
+            WHERE user_id = %s
+            AND guild_id = %s
+        """,(uid, guild_id))
+    result = cur.fetchone()
+    if result == None:
+        logger.info(f"Attempting to add member: {member.id} ({member.name}) of guild : {guild_id} to guilds_users")
+        cur.execute(
+            """INSERT INTO guilds_users (guild_id, user_id)
+                VALUES (%s,%s);
+            """,(guild_id, uid))
+        logger.info(f"Member: {member.id} ({member.name}) of guild : {guild_id} was added to the database")
+    # then have to verify the guilds_users table
+    else:
+        user_name = get_discord_username(member.id, cur)
+        logger.info(f"Verified memeber with username : {user_name} of guild : {guild_id} in guilds_users")
+
+
+def add_member_to_users_database(member, cur : db.extensions.cursor):
+    cur.execute(
+        """SELECT users.discord_id
+            FROM users
+            WHERE users.discord_id = %s;
+        """,(member.id,))
+    result = cur.fetchone()
+    if result == None:
+        logger.info(f"Attempting to add member with id {member.id} ({member.name})")
+        cur.execute(
+            """INSERT INTO users (discord_id, user_name)
+                VALUES (%s,%s);
+            """,(member.id, member.name))
+        logger.info(f"Member with id {member.id} ({member.name}) was added to the database")
+    # then have to verify the guilds_users table
+    else:
+        user_name = get_discord_username(result[0], cur)
+        logger.info(f"Verified memeber with username : {user_name}")
 
 
 def verify_member_in_database(total_guilds, bot_profile_id, cur : db.extensions.cursor):
@@ -552,22 +746,8 @@ def verify_member_in_database(total_guilds, bot_profile_id, cur : db.extensions.
 
         for member in guild.members:
                 if member.id != bot_profile_id:
-                    cur.execute(
-                        """SELECT users.discord_id
-                            FROM users
-                            WHERE users.discord_id = %s;
-                        """,(member.id,))
-                    result = cur.fetchone()
-                    if result == None:
-                        logger.info(f"Attempting to add member with id {member.id} ({member.name})")
-                        cur.execute(
-                            """INSERT INTO users (discord_id, user_name)
-                                VALUES (%s,%s);
-                            """,(member.id, member.name))
-                        logger.info(f"Member with id {member.id} ({member.name}) was added to the database")
-                    else:
-                        user_name = get_discord_username(result[0], cur)
-                        logger.info(f"Verified memeber with username : {user_name}")
+                    add_member_to_users_database(member, cur)
+                    add_member_to_guilds_users_database(member, guild.id, cur)
 
 def game_in_db_from_gid(gid, cur : db.extensions.cursor):
     if gid is None:
@@ -747,12 +927,16 @@ def add_game_to_database(name, IGDBClient : IGDBClient , cur : db.extensions.cur
     logger.info(f"Attempting to add {name} to the database...")
     on_steam, steam_game_data = check_steam_game_availability(name)
 
+    # There is a chance that a game that doesn't exist could be played so if we don't find a backup image it might be best to abort
+
+
+
     if on_steam == False:
         logger.info(f"{name} was not found on steam. Getting image from igdb")
         img = IGDBClient.get_alt_url(name)
         gid = get_game_id_from_name(name,cur)
-        if game_in_db_from_gid(gid,cur):
-            if get_on_steam_from_db(gid,cur):
+        if game_in_db_from_gid(gid,cur): # If the game is in the database
+            if get_on_steam_from_db(gid,cur): # If the game in the database says it can be found on steam
                 logger.warning(f"Tried to update game: {name} with non-steam data. Keeping existing data")
                 return
             prev_img = get_game_img(gid,cur)
@@ -901,7 +1085,7 @@ def link_steam_library(library_data : dict, steam_profile_data : dict, member_id
             if throttle_counter >= 30:
                 throttle_counter = 0
                 conn.commit()
-                logger.info(f"Throttle limit reached. Commiting data for batch {i}/{len(library_data['games'])} before resting")
+                logger.info(f"Throttle limit reached. Commiting data for batch {i + 1}/{len(library_data['games'])} before resting")
                 time.sleep(25)
 
         gid = get_game_id(app_id, cur)
@@ -951,19 +1135,25 @@ def link_steam_library(library_data : dict, steam_profile_data : dict, member_id
 
 def remove_user_steam_data(dicord_id, cur: db.extensions.cursor):
     uid = get_user_id(dicord_id, cur)
+
+    logger.info(f"Deleting data in user_games with id : {uid}")
     cur.execute(
         """DELETE FROM user_games
             WHERE user_id = %s 
             AND seen_playing_in_server = false;
         """,(uid,))
-    logger.info(f"Deleting data in user_games with id : {uid}")
-
+    
+    cur.execute(
+        """DELETE steam_playtime FROM user_games
+            WHERE user_id = %s 
+            AND seen_playing_in_server = true;
+        """,(uid,))
+    
     cur.execute(
         """DELETE FROM general_steam_data
             WHERE user_id = %s
         """,(uid,))
     logger.info(f"Deleting data in general_steam_data with id : {uid}")
-
 
 
 def add_cost(price):

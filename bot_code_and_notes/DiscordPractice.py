@@ -28,12 +28,18 @@ igdbclient = IGDBClient()
 
 class ConfirmDeny(discord.ui.View):
 
-    def __init__(self, discord_id):
-        super().__init__()
+    def __init__(self, discord_id, interaction : discord.Interaction):
+        super().__init__(timeout=60)
         self.discord_user = discord_id
+        self.first_interaction = interaction
         self.confirmed = False
         self.message = None
+        self.timed_out = False
 
+    async def on_timeout(self):
+        message = await self.first_interaction.original_response()
+        await message.edit(content=f"{self.first_interaction.user.mention} I do have other things to attend to, you know. Honestly, must you make my job more difficult than it needs to be? Try again when you're ready, but next time, do try not to keep me waiting.",embed=None,view=None)
+        self.stop()
 
     @discord.ui.button(label = "Confirm", style=discord.ButtonStyle.green)
     async def confirm(self, interaction : discord.Interaction, button):
@@ -127,7 +133,7 @@ class Client(commands.Bot):
             if before.activity.type == discord.ActivityType.playing:
                 game = before.activity.name
 
-                await asyncio.to_thread(end_game_tracking_process, before.id, game)
+                await asyncio.to_thread(end_game_tracking_process, before.id, game, "PLAYING", before.guild.id)
                 end_time = dt.datetime.now(timezone.utc)
                 print(f"{before.display_name} has stopped playing {game} at {end_time}")
                 #print(f"played for {(end_time - start_time).total_seconds()} seconds")
@@ -137,7 +143,7 @@ class Client(commands.Bot):
             if after.activity.type == discord.ActivityType.playing:
                 game = after.activity.name
                 start_time = dt.datetime.now(timezone.utc)
-                await asyncio.to_thread(start_game_tracking_process, game, after)
+                await asyncio.to_thread(start_game_tracking_process, game, after, "PLAYING", after.guild.id)
                 print(f"{after.display_name} has started playing {game} at {start_time}")
 
         # channel = self.get_channel(int(os.getenv("CHANNEL2_ID")))
@@ -170,11 +176,39 @@ class Client(commands.Bot):
         # This will handle streaming time and voice enter time
         # Ending a call will also need to end any streams
         # We are looking for going from channel to no channel
-        print(member.display_name)
+        guild_id = member.guild.id
+        a_state1 = "IN CALL"
+        a_state2 = "STREAMING"
+
+        # Call was joined
+        if before.channel == None and after.channel != None:
+            conn,cur = create_connection()
+            start_activity_tracker(member.id, None, a_state1, guild_id, cur)
+            close_connection(conn,cur)
+
+        # Call was ended
+        if before.channel != None and after.channel == None:
+            conn,cur = create_connection()
+            end_tracker(member.id, None, a_state1, guild_id, cur)
+            close_connection(conn,cur)
+
+        # Stream was started
+        if before.self_stream == False and after.self_stream == True:
+            conn,cur = create_connection()
+            start_activity_tracker(member.id, None, a_state2, guild_id, cur)
+            close_connection(conn,cur)
+
+        # Stream ended
+        if before.self_stream == True and after.self_stream == False:
+            conn,cur = create_connection()
+            end_tracker(member.id, None, a_state2, guild_id, cur)
+            close_connection(conn,cur)
+
+        #print(member.display_name)
         #print(type(before))
-        print(before)
+        #print(before)
         #print(type(after))
-        print(after)
+        #print(after)
         
 
 
@@ -207,30 +241,33 @@ def create_response(url, user_list):
         case 3:
             message = f"Hey {members} \n I saw you guys playing this game recently and thought you might like to see this \n {url}"
             return message
+        
 
-def end_game_tracking_process(member_id, game_name):
+def end_game_tracking_process(member_id, game_name, activity_type, guild_id):
     conn ,cur = create_connection()
-    end_tracker(member_id, game_name, "PLAYING", cur)
+    end_tracker(member_id, game_name, activity_type, guild_id, cur)
     close_connection(conn,cur)
 
 
-def start_game_tracking_process(game, after : discord.Member):
+def start_game_tracking_process(game, after : discord.Member, activity_type, guild_id):
     conn,cur = create_connection()
     # Immediatly update the game and user profiles with the new data if data not found
-    if not game_name_in_database(game, cur):
-        add_game_to_database(game, igdbclient, cur)
-        add_game_to_user_profile(game, after.id, cur)
-        conn.commit()
-    if not user_owns_game(after.id, game, cur):
-        add_game_to_user_profile(game, after.id, cur)
-        conn.commit()
+    if activity_type == "PLAYING":
+        if not game_name_in_database(game, cur):
+            add_game_to_database(game, igdbclient, cur)
+            add_game_to_user_profile(game, after.id, cur)
+            conn.commit()
+        if not user_owns_game(after.id, game, cur):
+            add_game_to_user_profile(game, after.id, cur)
+            conn.commit()
+        start_time = dt.datetime.now(timezone.utc)
+        logging.info(f"{after.display_name} has started to play {game} at around {start_time}")
 
     #gid = get_game_id_from_name(game, cur)
-    start_activity_tracker(after.id, game, "PLAYING", cur)
+    start_activity_tracker(after.id, game, activity_type, guild_id, cur)
     close_connection(conn,cur)
     #print(f"{after.display_name} has started to play {game} at {self.start_time}")
-    start_time = dt.datetime.now(timezone.utc)
-    logging.info(f"{after.display_name} has started to play {game} at around {start_time}")
+    
 
 
 def verify_linking_criteria(member_id, steam_id):
@@ -287,14 +324,14 @@ syncing_users = set()
 @client.tree.command(name = "link_steam_with_steam_id", description = "Links your public steam data to your guild profile.", guild = GUILD_ID)
 async def link_steam_id(interaction : discord.Interaction, steam_id : str):
     if interaction.user.id in syncing_users:
-        await interaction.response.send_message("Woah there buddy. It seems like you are already syncing a profile right now. Don't worry I'll be done soon")
+        await interaction.response.send_message("Woah there buddy. It seems like you are already syncing a profile right now. Realx I'll be done soon. I'd like to see you try to sort through dozens of games in seconds hmf")
         return
     discord_id = interaction.user.id
     syncing_users.add(discord_id)
 
     await interaction.response.defer()
 
-    view = ConfirmDeny(interaction.user.id)
+    view = ConfirmDeny(interaction.user.id, interaction)
     error_code, user_profile = await asyncio.to_thread(verify_linking_criteria, discord_id, steam_id)
 
     try:
@@ -314,7 +351,9 @@ async def link_steam_id(interaction : discord.Interaction, steam_id : str):
                 return
 
         await view.wait()
-        
+
+        if view.timed_out == True:
+            return
         if not view.confirmed:
             return
 
@@ -336,7 +375,7 @@ async def link_steam_id(interaction : discord.Interaction, steam_id : str):
         syncing_users.discard(discord_id)
 
 
-@client.tree.command(name = "unlink_steam_data", description = "removes all data associated with your steam accound", guild=GUILD_ID)
+@client.tree.command(name = "unlink_steam_data", description = "removes all data associated with your steam account", guild=GUILD_ID)
 async def unlink_steam(interation : discord.Interaction):
     discord_id = interation.user.id
     guild_id = interation.guild.id
