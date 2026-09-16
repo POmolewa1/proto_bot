@@ -1,3 +1,13 @@
+## Still to do
+1. guild card needs formatting and the banner color needs to be adjusted
+2. XP system still needs to be implementd
+3. MVP system needs to be implemented along with the mvp cards
+4. News still needs to be properly adjusted along with the time it searches for games and not sending duplicate news the same day (refreshes daily)
+5. Thoughts on adding a game filter that won't add games to user_profile and then maybe a /filterupdate that only I can use 
+6. Adding profile through steam also needs to handle ID NAMES
+7. Overall need to add a task that syncs users daily checks for news and a weekly task that checks for mvp
+8. Weekly user activity still needs to be implemented 
+
 ## On start up
 on_ready()
 1. Initialize the database when online

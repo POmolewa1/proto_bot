@@ -122,6 +122,9 @@ title = 930210
 # d = date - recency_scaling
 # print((date - d).days)
 
+# t = dt.timedelta(seconds=106143)
+# print(t)
+
 # Steam only exposes recently played games for a limited period.
 # Since exact last-played dates aren't reliably available, we use
 # the ordering of the first few games as an initial approximation.
@@ -135,7 +138,7 @@ def get_game_news_from_steam(appid_user_dictionary):
     date_cutoff = today - dt.timedelta(days=10)
     for appid in appid_user_dictionary:
         url = f"https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/?appid={appid}&maxlength=150&count=5"
-        request = requests.get(url)
+        request = requests.get(url, timeout= 20)
         news = request.json()
         if news is None:
             logger.info(f"No news found for appid : {appid}")

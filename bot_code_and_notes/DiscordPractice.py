@@ -26,6 +26,86 @@ intents.presences = True
 lock = asyncio.Lock()
 igdbclient = IGDBClient()
 
+class PageChange(discord.ui.View):
+    def __init__(self, page1, page2, page3):
+        super().__init__(timeout = 60)
+        self.message = None
+        self.curr_page = 0
+
+        self.server_stats_card = page1
+        self.steam_stats_card = page2
+
+        self.library_page = 0
+        self.last_page = (len(page3) - 1)
+        self.game_library_card = page3
+
+    async def on_timeout(self):
+        if self.message:
+            await self.message.edit(view = None)
+
+    @discord.ui.button(label="Prev", style = discord.ButtonStyle.blurple)
+    async def left(self, interaction : discord.Interaction, button):
+        started_on_page = True
+
+        if self.curr_page != 2:
+            page = self.curr_page
+            page -= 1
+
+            if page < 0:
+                self.curr_page = 2
+                started_on_page = False
+            else:
+                self.curr_page = page
+
+        match self.curr_page:
+            case 2:
+                if not started_on_page:
+                    self.library_page = self.last_page
+                    await interaction.response.edit_message(content = "", embed = self.game_library_card[self.library_page], view = self)
+                    return
+                if self.library_page == 0:
+                    self.curr_page = 1
+                    await interaction.response.edit_message(content="", embed= self.steam_stats_card, view = self)
+                    return
+
+                self.library_page -= 1
+                await interaction.response.edit_message(content="", embed= self.game_library_card[self.library_page], view = self)
+
+            case 1:
+                await interaction.response.edit_message(content="", embed= self.steam_stats_card, view = self)
+
+            case 0:
+                await interaction.response.edit_message(content="", embed= self.server_stats_card, view = self)
+
+
+    @discord.ui.button(label = "Next", style = discord.ButtonStyle.blurple)
+    async def right(self, interaction : discord.Interaction, button):
+        started_on_page = True
+        if self.curr_page != 2:
+            self.curr_page += 1
+            started_on_page = False
+
+        match self.curr_page:
+            case 2:
+                if not started_on_page:
+                    self.library_page = 0
+                    await interaction.response.edit_message(content="", embed= self.game_library_card[self.library_page], view = self)
+                    return
+
+                if self.library_page == self.last_page:
+                    self.library_page = 0
+                    #change to 0
+                    self.curr_page = 0
+                    await interaction.response.edit_message(content="", embed= self.server_stats_card, view = self)
+                    return
+            
+                self.library_page += 1
+                await interaction.response.edit_message(content="", embed= self.game_library_card[self.library_page], view = self)
+
+            case 1:
+                await interaction.response.edit_message(content="", embed= self.steam_stats_card, view = self)
+
+
 class ConfirmDeny(discord.ui.View):
 
     def __init__(self, discord_id, interaction : discord.Interaction):
@@ -63,6 +143,132 @@ class ConfirmDeny(discord.ui.View):
 
         await interaction.response.edit_message(content="Got it. If the profile isn't the one you expected try searching by id name",embed=None,view=None) 
         self.stop()
+
+
+class GuildCard(discord.Embed):
+    def __init__(self, user):
+        super().__init__()
+        self.profile_picture = user.display_avatar.url
+        self.user_name = user.display_name
+
+    def server_stats_card(self, recent_game_name, recent_game_image_url, profile_data):
+        self.title = f"{self.user_name}"
+        self.set_thumbnail(url = self.profile_picture)
+        self.color = discord.Color.from_str("#444443")
+
+        self.description = (
+            f"### Level {profile_data[3]} - Rooky \n"
+            f"### XP : {profile_data[4]} / {profile_data[3] * 100}\n\n"
+        )
+
+        stream_time = format_timedelta(dt.timedelta(seconds = profile_data[1]))
+        call_time = format_timedelta(dt.timedelta(seconds = profile_data[2]))
+        game_time = format_timedelta(dt.timedelta(seconds = profile_data[5]))
+        messages = profile_data[0]
+        # self.add_field(name = "🎥 Stream Time", value = stream_time, inline=True)
+        # self.add_field(name = "🔊 Call Time", value = call_time, inline=True)
+        # self.add_field(name = "🔊 Playtime", value = call_time, inline=True)
+        # self.add_field(name = "📨 Messages Sent", value = f"{messages}", inline=True)
+        # self.add_field(name="Most Recent Game", value="", inline=False)
+        self.add_field(name=f"General Server Stats", value= "-" * 52, inline=False)
+        self.add_field(
+            name="\u200b",
+            value=(
+                "```text\n"
+                f"🎥 Stream Time ---  {stream_time}\n\n" 
+                f"🔊 Call Time   ---  {call_time}\n\n" 
+                f"🕹️ Game Time   ---  {game_time}\n\n"
+                f"📨 Messages    ---  {messages}\n\n"
+                "```\n"
+            )
+        )
+
+        if recent_game_name is None:
+            recent_game_name = "N/A"
+        if recent_game_image_url is not None:
+            self.set_image(url= recent_game_image_url)
+        self.add_field(name=f"Most Recent Game", value= f"({recent_game_name})", inline=False)
+        # self.add_field(name="Games",value="🎮 Terraria\n🎮 Baldur's Gate 3\n🎮 Castlevania",inline=False)
+        # self.add_field(name="Recently Played Game", value="Terraria")
+
+    def steam_stats_card(self, steam_data):
+        # [account_name, creation_time, steam_games_count, account_cost, total_steam_time, last_sync, profile_pic, most_played_game_dict]
+        self.title = "Steam Stats"
+        self.set_thumbnail(url = steam_data[6])
+        self.description = (
+            f"### {steam_data[0]}"
+        )
+
+        self.add_field(name=f"General Server Stats", value= "-" * 52, inline=False)
+
+        today = dt.datetime.now(timezone.utc)
+        age = relativedelta(today, steam_data[1])
+        creation_time = format_age(age)
+        steam_games_count = steam_data[2]
+
+        # going to have to format this
+        account_cost = steam_data[3]
+
+        total_steam_time = format_timedelta(dt.timedelta(seconds = steam_data[4]))
+        last_sync = steam_data[5]
+
+        game_name = ""
+        if len(steam_data[7]) == 0:
+            game_name = "N/A"
+            playtime = "N/A"
+        else:
+            most_played_game = list(steam_data[7].items())
+            game_name, game_data = most_played_game[0]
+            playtime = format_timedelta(dt.timedelta(seconds = game_data['playtime']))
+        
+            self.set_image(url=game_data['img'])
+
+        self.add_field(
+            name="",
+            value=(
+                "```text\n"
+                f"🕰️ Account Age ---  {creation_time}\n\n" 
+                f"---------------------------------"
+                f"📚 Games in Library   ---  {steam_games_count}\n\n"
+                f"---------------------------------"
+                f"💵 Aprox. Libray value\n        ${account_cost}\n\n" 
+                f"---------------------------------"
+                f"👾 Total Game Time   ---  {total_steam_time}\n\n"
+                "```\n"
+            )
+        )
+
+        self.add_field(name=f"Most Played Game", value= f"({game_name} - {playtime})", inline=False)
+
+        self.set_footer(text= f"\n\nLast synced {last_sync}")
+    
+
+    def game_library_card(self, game_library, start_index):
+
+        # if we don't have a game library then don't make this
+
+        self.title = f"{self.user_name}"
+        self.set_thumbnail(url = self.profile_picture)
+
+        end_index = start_index + 25
+        if end_index > len(game_library):
+            end_index = len(game_library)
+
+        game_list = list(game_library.items())
+        # print(game_list)
+        game_library_page = game_list[start_index: end_index]
+        for game_name, game_data in game_library_page:
+
+            server_time = format_timedelta(dt.timedelta(seconds = game_data['server_time']))
+
+            if game_data['steam_time'] is None:
+                steam_time = 0
+            else:
+                steam_time = format_timedelta(dt.timedelta(seconds = game_data['steam_time']))
+
+            self.add_field(name=f"🎮 {game_name}", value=f"[Server Time: {server_time}]\n [Steam Time : {steam_time}]", inline=False)
+
+        self.set_footer(text= f"\n\nGames ({start_index} - {end_index}) / {len(game_library)}")
 
 
 class Embedding(discord.Embed):
@@ -214,6 +420,97 @@ class Client(commands.Bot):
 
 # Bot command helpers
 #-----------------
+def format_timedelta(td):
+    total_minutes = int(td.total_seconds() // 60)
+
+    days, remainder = divmod(total_minutes, 24 * 60)
+    hours, minutes = divmod(remainder, 60)
+
+    parts = []
+
+    if days:
+        parts.append(f"{days}d")
+    if hours:
+        parts.append(f"{hours}h")
+    if minutes:
+        parts.append(f"{minutes}m")
+
+    return " ".join(parts) if parts else "0m"
+
+def format_age(age):
+    parts = []
+
+    if age.years:
+        parts.append(f"{age.years}y")
+
+    if age.months:
+        parts.append(f"{age.months}mo")
+
+    if age.days:
+        parts.append(f"{age.days}d")
+
+    if age.hours:
+        parts.append(f"{age.hours}h")
+
+    if age.minutes:
+        parts.append(f"{age.minutes}m")
+
+    return " ".join(parts) if parts else "0m"
+
+# def init_guild_card(user, guild_id):
+#     game_pic = "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/2893570/035bf8ec4e6bd65ebea782063b1157e526533740/header.jpg?t=1773044632"
+#     conn,cur = create_connection()
+#     game_name, game_pic = get_recently_played_game_img(user.id, cur)
+#     pdata = get_user_server_stats(user.id, guild_id, cur)
+#     card = GuildCard(user)
+#     card.server_stats_card(game_name, game_pic, pdata)
+#     library = get_user_total_game_library(user.id, cur)
+
+
+def create_server_profile_card(user, guild_id):
+    #game_pic = "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/2893570/035bf8ec4e6bd65ebea782063b1157e526533740/header.jpg?t=1773044632"
+    conn,cur = create_connection()
+    game_name, game_pic = get_recently_played_game_img(user.id, cur)
+    pdata = get_user_server_stats(user.id, guild_id, cur)
+    card = GuildCard(user)
+    card.server_stats_card(game_name, game_pic, pdata)
+    close_connection(conn,cur)
+
+    return card
+
+
+def create_game_library_card(user):
+    library_pages = []
+
+    conn,cur = create_connection()
+
+    library = get_user_total_game_library(user.id, cur)
+    start_index = 0
+    max_index = len(library)
+
+    # Embeds only allow a max of 25 items so this allows us to display games in batches of 25 per page
+    while(start_index < max_index):
+        card = GuildCard(user)
+        card.game_library_card(library,start_index)
+        library_pages.append(card)
+        start_index += 25
+
+    close_connection(conn,cur)
+
+    return library_pages
+
+def create_steam_card(user):
+    conn,cur = create_connection()
+    steam_stats = get_user_steam_stats(user.id, cur)
+    close_connection(conn,cur)
+    steam_card = GuildCard(user)
+    steam_card.steam_stats_card(steam_stats)
+
+    return steam_card
+    # come back here
+
+
+
 def create_response(url, user_list):
     variant = random.randint(1,3)
     members = ""
@@ -281,12 +578,31 @@ def verify_linking_criteria(member_id, steam_id):
     return verify_steam_access(steam_id)
 
 
+def syncing_process(member_id):
+    conn,cur = create_connection()
+    steam_id = get_user_steam_id(member_id, cur)
+    if steam_id is None:
+        logger.warning(f"Aborting syncing process for member : {member_id} because no steam id was found")
+        return
+    error_code, user_profile = verify_steam_access(steam_id)
+    # 2 is private so we turn off the auto sync and return
+    if error_code == 2:
+        # swap auto sync to false
+        return
+    if error_code == 0:
+        game_library = get_steam_game_library(steam_id)
+        link_steam_library(game_library, user_profile, member_id, cur, conn, True)
+
+    close_connection(conn,cur)
+
+
 def linking_process(user_profile, interaction):
     conn,cur = create_connection()
     logging.info(f"Getting the game library from {user_profile['player']['personaname']}")
     game_library = get_steam_game_library(user_profile['player']['steamid'])
     link_steam_library(game_library, user_profile, interaction.user.id, cur, conn)
     close_connection(conn,cur)
+
 
 
 # Bot /commands
@@ -303,16 +619,33 @@ async def say_hello(interaction: discord.Interaction):
 async def printer(interaction: discord.Interaction, printer: str):
     await interaction.response.send_message(printer)
 
+@client.tree.command(name = "toggle_steam_sync", description= "Turns on/off whether your steam account will be updated at the end of the day", guild= GUILD_ID)
+async def toggle_sync(interaction: discord.Interaction):
+    await interaction.response.defer()
+    member_id = interaction.user.id
+    syncing_process(member_id)
+    await interaction.followup.send("Sync happend")
+
+
 @client.tree.command(name = "guildcard", description="print your guild card", guild=GUILD_ID)
 async def guildcard(interaction: discord.Interaction, user: discord.Member):
-    
+    if user.id == client.user.id:
+        await interaction.response.send_message(f"I am part of the guild but I'm just the record keeper.")
+        return
+    await interaction.response.defer()
+
     user_name = user.display_name
-    picture = Embedding(user.display_avatar.url)
+    #picture = Embedding(user.display_avatar.url)
     #picture = Embedding("https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/2369900/header.jpg?t=1745815495")
     #picture = Embedding("http://images.igdb.com/igdb/image/upload/t_thumb/co904o.jpg")
 
-    await interaction.response.send_message(f"Here is {user_name}'s profile", embed = picture)
+    server_stats_card = create_server_profile_card(user, interaction.guild.id)
+    library_stats_card = create_game_library_card(user)
+    steam_card = create_steam_card(user)
+    view = PageChange(server_stats_card, steam_card, library_stats_card)
 
+    await interaction.followup.send(f"Here is {user_name}'s profile", embed = server_stats_card, view = view)
+    view.message = await interaction.original_response()
     #await interaction.followup.send(print_db())
 
      # if user_name != interaction.user.display_name:
@@ -321,7 +654,7 @@ async def guildcard(interaction: discord.Interaction, user: discord.Member):
 
 syncing_users = set()
 
-@client.tree.command(name = "link_steam_with_steam_id", description = "Links your public steam data to your guild profile.", guild = GUILD_ID)
+@client.tree.command(name = "link_steam", description = "Links your public steam data to your guild profile.", guild = GUILD_ID)
 async def link_steam_id(interaction : discord.Interaction, steam_id : str):
     if interaction.user.id in syncing_users:
         await interaction.response.send_message("Woah there buddy. It seems like you are already syncing a profile right now. Realx I'll be done soon. I'd like to see you try to sort through dozens of games in seconds hmf")
@@ -360,7 +693,7 @@ async def link_steam_id(interaction : discord.Interaction, steam_id : str):
         interaction = view.message
 
         if lock.locked():
-            await interaction.message.edit(content="Looks like someone is currently syncing right now. Don't worry I'll get to you in a bit as soon as I finish up with them",embed=None,view=None)
+            await interaction.message.edit(content="Looks like someone is currently syncing right now. Don't worry! I'll get to you in a bit as soon as I finish up with them",embed=None,view=None)
 
         async with lock:
             # maybe add a data base look up here to see if the user has a steam profile already
@@ -375,7 +708,7 @@ async def link_steam_id(interaction : discord.Interaction, steam_id : str):
         syncing_users.discard(discord_id)
 
 
-@client.tree.command(name = "unlink_steam_data", description = "removes all data associated with your steam account", guild=GUILD_ID)
+@client.tree.command(name = "unlink_steam", description = "removes all data associated with your steam account", guild=GUILD_ID)
 async def unlink_steam(interation : discord.Interaction):
     discord_id = interation.user.id
     guild_id = interation.guild.id
@@ -401,28 +734,31 @@ async def unlink_steam(interation : discord.Interaction):
 
 @tasks.loop(
         time = [
-            dt.time(hour=18, minute=18, tzinfo=ZoneInfo("America/Los_Angeles")), 
+            dt.time(hour = 9, minute = 44, tzinfo=ZoneInfo("America/Los_Angeles")), 
             dt.time(hour = 21, minute = 0, tzinfo=ZoneInfo("America/Los_Angeles"))
         ]
 )
 async def get_game_news():
     # going to need to get a list off appids from everyones most recently played games that month
     # need to look at all the users who have that game and have played within a month and maybe @ them in the messages
-    conn,cur = create_connection()
     for guild in client.guilds:
         member_list = []
         for member in guild.members:
             if member.id != client.user.id:
                 member_list.append(member.id)
         # when we store the cannels for a guild find it first here instead
+        news_dictionary = await asyncio.to_thread(process_member_games_into_news, member_list)
         channel = guild.get_channel(int(os.getenv("CHANNEL2_ID")))
-        news_dictionary = process_member_games_into_news(member_list, cur)
 
         for game_id, game_data in news_dictionary.items():
             if len(game_data['news_articles']) != 0:
                 for article_url in game_data['news_articles']:
                     message = create_response(article_url, game_data['relavent_members'])
                     await channel.send(message)
-    close_connection(conn,cur)
+
+    
+# profile stats = [total_messages_sent, total_stream_time, total_call_time, guild_level, xp, server_playtime]
+# Steam stats = [account_name, creation_time, steam_games_count, account_cost, total_steam_time, last_sync]
+# Game_library dictionary   game_name : {server_time : x, steam_time : x}
 
 client.run(os.getenv("DISCORD_TOKEN"), log_handler=handler, log_level=logging.DEBUG)

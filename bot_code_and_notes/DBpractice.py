@@ -8,6 +8,7 @@ import datetime as dt
 from datetime import timezone
 from igdbPractice import *
 from enum import Enum
+from dateutil.relativedelta import relativedelta
 
 class activity_errors(Enum):
     NO_CONFLICT = 0
@@ -183,6 +184,7 @@ def initialize_db():
         account_cost INT,
         total_steam_time INT,
         auto_sync_steam BOOLEAN,
+        profile_pic TEXT,
         last_sync TIMESTAMPTZ
     );
     """)
@@ -280,6 +282,9 @@ def get_user_id(member_id : int, cur: db.extensions.cursor):
             WHERE users.discord_id = %s
         """,(member_id,))
     result = cur.fetchone()
+    if result is None:
+        logger.error(f"Could not find a uid matching member id : {member_id}")
+        return None
     return result[0]
 
 
@@ -310,7 +315,8 @@ def add_to_todays_news(news_title, gid, cur : db.extensions.cursor):
     )
 
 
-def process_member_games_into_news(member_id_list, cur : db.extensions.cursor):
+def process_member_games_into_news(member_id_list):
+    conn,cur = create_connection()
     logger.info(f"Started processing game news for members : {member_id_list}")
     # for each person in the list get all the games that they played that month
     # add those games to a list if they are not already added
@@ -359,6 +365,7 @@ def process_member_games_into_news(member_id_list, cur : db.extensions.cursor):
                 news[app_id]['relavent_members'].append(discord_id)
 
     #print(news)
+    close_connection(conn, cur)
     return get_game_news_from_steam(news)
 
 # conn,cur = create_connection()
@@ -423,6 +430,7 @@ def remove_tracked_game(uid, gid, cur : db.extensions.cursor):
         """,(uid, gid)
     )
 
+
 def update_guilds_users_total_time(uid, guild_id, activity_type, session_time, cur : db.extensions.cursor):
     if activity_type == "IN CALL":
         cur.execute(
@@ -472,6 +480,33 @@ def update_guilds_users_total_time(uid, guild_id, activity_type, session_time, c
             """,(new_total, uid, guild_id)
         )
 
+def get_user_guilds(uid, cur : db.extensions.cursor):
+    guild_list = []
+    cur.execute(
+        """SELECT guild_id FROM guilds_users
+            WHERE user_id = %s
+        """,(uid,)
+    )
+
+    results = cur.fetchall()
+    if not results:
+        return guild_list
+
+    for result in results:
+        guild_list.append(result[0])
+
+    return guild_list
+    
+
+def add_to_server_log_for_syncing_process(uid, gid, activity_type, activity_time, start_time, cur : db.extensions.cursor):
+    guild_list = get_user_guilds(uid, cur)
+    for guild_id in guild_list:
+        cur.execute(
+            """INSERT INTO server_log (guild_id, user_id, game_id, activity_type, activity_time, start_time)
+                VALUES (%s,%s,%s,%s,%s,%s)
+            """,(guild_id, uid, gid, activity_type, activity_time, start_time)
+        )
+
 
 def add_to_server_log(uid, gid, activity_type, guild_id, activity_time, start_time, cur : db.extensions.cursor):
     cur.execute(
@@ -479,6 +514,7 @@ def add_to_server_log(uid, gid, activity_type, guild_id, activity_time, start_ti
             VALUES (%s,%s,%s,%s,%s,%s)
         """,(guild_id, uid, gid, activity_type, activity_time, start_time)
     )
+
 
 def manually_end_game_session(uid, guild_id, activity_type, cur : db.extensions.cursor):
     logger.info(f"Attempting to end manual tracking on for user : {uid}...")
@@ -573,14 +609,15 @@ def end_voice_tracker(member_id, activity_type, guild_id, cur : db.extensions.cu
         error_status = check_for_activity(uid, None, activity_type, cur)
         if error_status == activity_errors.STREAM_IN_PROGRESS:
             end_voice_tracker(member_id, "STREAMING", guild_id, cur)
-        print(f"In call for {time_tracked} seconds")
+        print(f"User id : {uid} was in call for {time_tracked} seconds")
     else:
-        print(f"Streaming for {time_tracked} seconds")
+        print(f"User id : {uid} was streaming for {time_tracked} seconds")
 
     update_guilds_users_total_time(uid, guild_id, activity_type, time_tracked, cur)
     add_to_server_log(uid, None, activity_type, guild_id, time_tracked, start_time, cur)
     remove_tracked_activity(uid, activity_type, cur)
     logger.info(f"Successfully recorded activity : {activity_type} with user : {member_id} with a total of {time_tracked} seconds")
+
 
 def end_tracker(member_id, game_name, activity_type : str, guild_id, cur : db.extensions.cursor):
 
@@ -1059,6 +1096,54 @@ def update_user_recently_played(uid, steam_id, cur : db.extensions.cursor):
             if (today - new_date).days < 14:
                 date = new_date
 
+def get_user_steam_id(member_id, cur : db.extensions.cursor):
+    uid = get_user_id(member_id, cur)
+    cur.execute(
+        """SELECT steam_id FROM general_steam_data
+            WHERE user_id = %s
+        """,(uid,)
+    )
+
+    result = cur.fetchone()
+    if result is None:
+        logger.warning(f"Could not find steam id for user : {uid}")
+        return result
+
+    return result[0]
+
+def get_curr_steam_playtime(uid, gid, cur : db.extensions.cursor):
+    cur.execute(
+        """SELECT steam_playtime FROM user_games
+            WHERE user_id = %s
+            AND game_id = %s
+        """,(uid, gid)
+    )
+
+    result = cur.fetchone()
+    if result is None:
+        logger.error(f"Could not find playtime for uid : {uid} with game gid : {gid}")
+        return result
+
+    return result[0]
+
+def last_synced_recently(uid, cur : db.extensions.cursor):
+    cur.execute(
+        """SELECT last_sync FROM general_steam_data
+            WHERE user_id = %s
+        """,(uid,)
+    )
+
+    result = cur.fetchone()
+    if result is None:
+        return False
+
+    last_sync_date = result[0]
+
+    if last_sync_date >= (dt.datetime.now(timezone.utc) - dt.timedelta(days = 2)):
+        return True
+
+    return False
+
  
 def link_steam_library(library_data : dict, steam_profile_data : dict, member_id : int, cur : db.extensions.cursor, conn : db.extensions.connection, is_sync = False):
     #conn,cur = create_connection()
@@ -1076,7 +1161,8 @@ def link_steam_library(library_data : dict, steam_profile_data : dict, member_id
         app_id = game['appid']
 
         if game_in_db(app_id, cur):
-            logger.info(f"Processing {game['name']} from existing game data")
+            if not is_sync:
+                logger.info(f"Processing {game['name']} from existing game data")
         else:
             logger.info(f"Processing {game['name']} from new game data")
             add_game_to_database_from_steam(game,cur)
@@ -1087,10 +1173,35 @@ def link_steam_library(library_data : dict, steam_profile_data : dict, member_id
                 conn.commit()
                 logger.info(f"Throttle limit reached. Commiting data for batch {i + 1}/{len(library_data['games'])} before resting")
                 time.sleep(25)
-
+        
         gid = get_game_id(app_id, cur)
         playtime = game['playtime_forever']
         playtime_seconds = playtime * 60
+        # If sync then we need to do a database lookup to see if the game has a different time played than what is stored
+        # If that is the case we need to update the last time played to today and then add that playtime to the server log
+        # No xp will be given but maybe it can contribute to mvp
+        if is_sync:
+            logger.info(f"Starting syncing process for user : {uid} with gid {gid}")
+            old_time_seconds = get_curr_steam_playtime(uid, gid, cur)
+            if (
+                old_time_seconds is not None 
+                and playtime_seconds > old_time_seconds 
+                and last_synced_recently(uid,cur)
+            ):
+                date_buffer = dt.datetime.now(timezone.utc) - dt.timedelta(hours = 12)
+                cur.execute(
+                    """UPDATE user_games
+                        SET last_time_played = %s
+                        WHERE user_id = %s
+                        AND game_id = %s
+                    """,(date_buffer, uid, gid)
+                )
+
+                time_difference = playtime_seconds - old_time_seconds
+                logger.info(f"Adding {time_difference} seconds of playtime for user : {uid} in game : {gid}")
+                # technically this would need to be done for each guild the user is in
+                add_to_server_log_for_syncing_process(uid, gid, "PLAYING", time_difference, date_buffer, cur)
+            
         cur.execute(
             """INSERT INTO user_games (user_id, game_id, steam_playtime)
                 VALUES(%s,%s,%s)
@@ -1109,11 +1220,12 @@ def link_steam_library(library_data : dict, steam_profile_data : dict, member_id
     creation_time = dt.datetime.fromtimestamp(creation_time_stamp, timezone.utc)
     total_library_cost = get_total_library_cost(member_id, cur)
     total_steam_time = get_total_steam_time(member_id, cur)
+    profile_pic = steam_profile_data['player']['avatarfull']
     if total_steam_time is None:
         total_steam_time = 0
     cur.execute(
-        """INSERT INTO general_steam_data (user_id, steam_id, account_name, creation_time, steam_games_count, account_cost, total_steam_time)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """INSERT INTO general_steam_data (user_id, steam_id, account_name, creation_time, steam_games_count, account_cost, total_steam_time, auto_sync_steam, last_sync, profile_pic)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (user_id)
             DO UPDATE
                 SET 
@@ -1122,8 +1234,10 @@ def link_steam_library(library_data : dict, steam_profile_data : dict, member_id
                     creation_time = EXCLUDED.creation_time,
                     steam_games_count = EXCLUDED.steam_games_count,
                     account_cost = EXCLUDED.account_cost,
-                    total_steam_time = EXCLUDED.total_steam_time
-        """,(uid, steam_id, steam_name, creation_time, game_count, total_library_cost, total_steam_time))
+                    total_steam_time = EXCLUDED.total_steam_time,
+                    profile_pic = EXCLUDED.profile_pic
+        """,(uid, steam_id, steam_name, creation_time, game_count, total_library_cost, total_steam_time, True, dt.datetime.now(timezone.utc), profile_pic)
+    )
 
     # I think it would be a good idea to pass a status into this function called link/sync
     # If we are linking (getting steam info for the first time) we use the update recently played otherwise we don't need to use that function
@@ -1144,7 +1258,8 @@ def remove_user_steam_data(dicord_id, cur: db.extensions.cursor):
         """,(uid,))
     
     cur.execute(
-        """DELETE steam_playtime FROM user_games
+        """UPDATE user_games
+            SET steam_playtime = NULL
             WHERE user_id = %s 
             AND seen_playing_in_server = true;
         """,(uid,))
@@ -1155,6 +1270,227 @@ def remove_user_steam_data(dicord_id, cur: db.extensions.cursor):
         """,(uid,))
     logger.info(f"Deleting data in general_steam_data with id : {uid}")
 
+
+def get_user_server_stats(member_id, guild_id, cur : db.extensions.cursor):
+    stats = []
+
+    uid = get_user_id(member_id, cur)
+    
+    cur.execute(
+        """SELECT total_messages_sent, total_stream_time, total_call_time, guild_level, xp 
+            FROM guilds_users
+            WHERE guild_id = %s
+            AND user_id = %s
+        """,(guild_id, uid)
+    )
+
+    result = cur.fetchone()
+    if result is None:
+        logger.error(f"Could not find user stats for user with discord id : {member_id} in guild : {guild_id}")
+        return None
+
+    for stat in result:
+        stats.append(stat)
+
+    cur.execute(
+        """SELECT server_hours FROM user_games
+            WHERE user_id = %s
+            AND server_hours > 0
+        """,(uid,)
+    )
+
+    result = cur.fetchall()
+
+    if not result:
+        stats.append(0)
+        return stats
+
+    total = 0
+    for time in result:
+        total += time[0]
+    stats.append(total)
+
+    return stats
+
+
+def get_user_steam_stats (member_id, cur : db.extensions.cursor):
+    steam_stats = []
+    uid = get_user_id(member_id, cur)
+    if uid is None:
+        return
+    
+    cur.execute(
+        """SELECT account_name, creation_time, steam_games_count, account_cost, total_steam_time, last_sync, profile_pic
+            FROM general_steam_data
+            WHERE user_id = %s
+        """,(uid,)
+    )
+
+    result = cur.fetchone()
+    if result is None:
+        logger.warning(f"Could not find steam data for user : {uid}")
+        return result
+
+    for stat in result:
+        steam_stats.append(stat)
+    # today = dt.datetime.now(timezone.utc)
+    # age = relativedelta(today, result[1])
+
+    cur.execute(
+        """SELECT game_id, steam_playtime FROM user_games
+            WHERE user_id = %s
+            ORDER BY steam_playtime DESC NULLS LAST
+        """,(uid,)
+    )
+
+    most_played_game_data = {}
+    result = cur.fetchone()
+    
+    if result is not None:
+        gid = result[0]
+        playtime = result[1]
+
+        cur.execute(
+            """SELECT game_name, img FROM games
+                WHERE id = %s
+            """,(gid,)
+        )
+
+        result = cur.fetchone()
+
+        most_played_game_data[f'{result[0]}'] = {
+            'playtime' : playtime,
+            'img' : result[1]
+        }
+
+    steam_stats.append(most_played_game_data)
+        
+    #print(steam_stats)
+
+    return steam_stats
+
+# conn,cur = create_connection()
+# x = get_user_steam_stats(938183066948612096, cur)
+# print(x)
+# close_connection(conn,cur)
+
+
+def get_game_name_from_id(gid, cur : db.extensions.cursor):
+    cur.execute(
+        """SELECT game_name FROM games
+            WHERE id = %s
+        """,(gid,)
+    )
+
+    result = cur.fetchone()
+    if result is None:
+        logger.error("Could not find game name for gid : {gid}")
+        return None
+
+    return result[0]
+
+def add_game_to_library_list(game_library, result, cur : db.extensions.cursor):
+    for game in result:
+        game_name = get_game_name_from_id(game[0], cur)
+        if game_name is None:
+            game_library[f'{game_name}'] = None
+            logger.error(f"Game {game_name} was not found in the data base so it's stats will be added as None")
+        server_time = game[1]
+        steam_time = game[2]
+        game_stats = {
+            'server_time' : server_time,
+            'steam_time' : steam_time
+        }
+        game_library[f'{game_name}'] = game_stats
+
+    return game_library
+
+
+def get_user_total_game_library (member_id, cur : db.extensions.cursor):
+    uid = get_user_id(member_id, cur)
+    game_library = {}
+
+    cur.execute(
+        """SELECT game_id, server_hours, steam_playtime FROM user_games
+            WHERE user_id = %s
+            AND last_time_played IS NOT NULL
+            ORDER BY last_time_played DESC
+        """,(uid,)
+    )
+
+    result = cur.fetchall()
+    if not result:
+        logger.warning(f"Could not find a date that was NOT null in library data for uid : {uid}")
+    else:
+        game_library = add_game_to_library_list(game_library, result, cur)
+
+    # game_library = add_game_to_library_list(game_library, result, cur)
+    # for game in result:
+    #     game_name = get_game_name_from_id(game[0], cur)
+    #     if game_name is None:
+    #         game_library[f'{game_name}'] = None
+    #         logger.error(f"Game {game_name} was not found in the data base so it's stats will be added as None")
+    #     server_time = game[1]
+    #     steam_time = game[2]
+    #     game_stats = {
+    #         'server_time' : server_time,
+    #         'steam_time' : steam_time
+    #     }
+    #     game_library[f'{game_name}'] = game_stats
+
+    cur.execute(
+        """SELECT game_id, server_hours, steam_playtime FROM user_games
+            WHERE user_id = %s
+            AND last_time_played IS NULL
+        """,(uid,)
+    )
+
+    result = cur.fetchall()
+    if not result:
+        logger.warning(f"Could not find a data was null in library data for uid : {uid}")
+    else:
+        game_library = add_game_to_library_list(game_library, result, cur)
+
+    if len(game_library) == 0:
+        logger.warning(f"Could not any game data for user with uid : {uid}")
+        return None
+    
+    return game_library
+
+
+
+def get_recently_played_game_img(member_id, cur : db.extensions.cursor):
+    uid = get_user_id(member_id, cur)
+
+    cur.execute(
+        """SELECT game_id FROM user_games
+            WHERE user_id = %s
+            ORDER BY last_time_played DESC NULLS LAST
+        """,(uid,)
+    )
+
+    result = cur.fetchone()
+    if result is None:
+        logger.warning(f"Could not find games for user : {uid}")
+        return None, None
+
+    gid = result[0]
+
+    cur.execute(
+        """SELECT game_name, img FROM games
+            WHERE id = %s
+        """,(gid,)
+    )
+
+    result = cur.fetchone()
+    if result is None:
+        logger.error(f"Could not find a game matching gid : {gid}")
+        return None, None
+    
+    game_name = result[0]
+    img = result[1]
+
+    return game_name, img
 
 def add_cost(price):
     conn,cur = create_connection()
