@@ -10,6 +10,7 @@ from dateutil.relativedelta import relativedelta
 import requests
 import logging
 import time
+from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 KEY = os.getenv("STEAM_API_KEY")
@@ -130,6 +131,10 @@ title = 930210
 # the ordering of the first few games as an initial approximation.
 # Activity tracking and autosync will replace these estimates later.
 
+# pacific = ZoneInfo("America/Los_Angeles")
+# now = dt.datetime.now(timezone.utc)
+# now = now.astimezone(pacific).time().hour
+# print(now)
 
 def get_game_news_from_steam(appid_user_dictionary):
     # need to return a dictionary of games to news like| Helldivers 2(id= 33333) : news(dictionary) |

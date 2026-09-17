@@ -4,8 +4,8 @@ from dotenv import load_dotenv
 load_dotenv()
 import logging
 from SteamPractice import *
-import datetime as dt
-from datetime import timezone
+# import datetime as dt
+# from datetime import timezone
 from igdbPractice import *
 from enum import Enum
 from dateutil.relativedelta import relativedelta
@@ -196,6 +196,7 @@ def initialize_db():
         game_id INT REFERENCES games(id),
         activity_type VARCHAR(255),
         start_time TIMESTAMPTZ,
+        guild_id BIGINT,
         UNIQUE(user_id, activity_type)
     );
     """)
@@ -496,8 +497,54 @@ def get_user_guilds(uid, cur : db.extensions.cursor):
         guild_list.append(result[0])
 
     return guild_list
-    
 
+
+def get_member_id(uid , cur : db.extensions.cursor):
+    cur.execute(
+        """SELECT discord_id FROM users
+            WHERE id = %s
+        """,(uid,)
+    )
+    result = cur.fetchone()
+    if result is None:
+        logger.error(f"Could not find a discord id for uid : {uid}")
+        return
+
+    return result[0]
+
+
+def restart_tracked_activities(cur : db.extensions.cursor):
+
+    cur.execute(
+        """SELECT * FROM activity_tracker
+        """
+    )
+
+    results = cur.fetchall()
+
+    if not results:
+        logger.info("No activities are currently being tracked. Ending replacement process")
+        return
+    
+    time_buffer = dt.timedelta(minutes=3)
+
+    for result in results:
+        user_id = result[1]
+        game_id = result[2]
+        activity_type = result[3]
+        guild_id = result[5]
+
+        member_id = get_member_id(user_id, cur)
+
+        if activity_type == "PLAYING":
+            game_name = get_game_name_from_id(game_id, cur)
+            end_game_tracker(member_id, game_name, activity_type, guild_id, cur)
+            start_activity_tracker(member_id, game_name, activity_type, guild_id, cur, time_buffer)
+        else:
+            end_voice_tracker(member_id, activity_type, guild_id, cur)
+            start_activity_tracker(member_id, None, activity_type, guild_id, cur, time_buffer)
+
+    
 def add_to_server_log_for_syncing_process(uid, gid, activity_type, activity_time, start_time, cur : db.extensions.cursor):
     guild_list = get_user_guilds(uid, cur)
     for guild_id in guild_list:
@@ -666,10 +713,13 @@ def check_for_activity(uid, gid, activity_type, cur: db.extensions.cursor):
         return activity_errors.STREAM_IN_PROGRESS
 
 
-def start_activity_tracker(member_id : int, game_name : str, activity_type : str, guild_id, cur : db.extensions.cursor):
+def start_activity_tracker(member_id : int, game_name : str, activity_type : str, guild_id, cur : db.extensions.cursor, time_buffer : dt.timedelta = None):
 
     uid = get_user_id(member_id, cur)
-    curr_time = dt.datetime.now(timezone.utc)
+    if time_buffer is not None:
+        curr_time = dt.datetime.now(timezone.utc) + time_buffer
+    else:
+        curr_time = dt.datetime.now(timezone.utc)
 
     if activity_type == "PLAYING":
         logger.info(f"Attempting to start tracking {game_name} for user {member_id}...")
@@ -708,10 +758,10 @@ def start_activity_tracker(member_id : int, game_name : str, activity_type : str
     # We need to do the same thing on stream end
 
     cur.execute(
-        """INSERT INTO activity_tracker (user_id, activity_type, start_time)
-            VALUES (%s, %s, %s)
+        """INSERT INTO activity_tracker (user_id, activity_type, start_time, guild_id)
+            VALUES (%s, %s, %s, %s)
             ON CONFLICT (user_id, activity_type) DO NOTHING
-        """,(uid, activity_type, curr_time))
+        """,(uid, activity_type, curr_time, guild_id))
     logger.info(f"Tracking for activity : {activity_type} started sucessfully")
 
 
@@ -1235,6 +1285,7 @@ def link_steam_library(library_data : dict, steam_profile_data : dict, member_id
                     steam_games_count = EXCLUDED.steam_games_count,
                     account_cost = EXCLUDED.account_cost,
                     total_steam_time = EXCLUDED.total_steam_time,
+                    last_sync = EXCLUDED.last_sync,
                     profile_pic = EXCLUDED.profile_pic
         """,(uid, steam_id, steam_name, creation_time, game_count, total_library_cost, total_steam_time, True, dt.datetime.now(timezone.utc), profile_pic)
     )
@@ -1491,6 +1542,147 @@ def get_recently_played_game_img(member_id, cur : db.extensions.cursor):
     img = result[1]
 
     return game_name, img
+
+def create_clock():
+    activity_clock = []
+    for i in range(24):
+        activity_clock.append(0)
+
+    return activity_clock
+
+def process_activity_data(uid, from_time, to_time, week_period, activity_calendar, cur : db.extensions.cursor):
+    activity_clock = create_clock()
+    carry_over_clock = create_clock()
+    pacific = ZoneInfo("America/Los_Angeles")
+
+    cur.execute(
+        """SELECT start_time, activity_time FROM server_log
+            WHERE user_id = %s
+            AND start_time >= %s
+            AND start_time <= %s
+            ORDER BY start_time ASC
+        """,(uid, from_time, to_time)
+    )
+    
+    results = cur.fetchall()
+
+    if not results:
+        print("No results")
+        return activity_calendar
+    
+    cur_day = None
+    # print(results)
+    # print(len(results))
+    for result in results:
+        carry_time = False
+        # print(type(result[0]))
+        relative_time = result[0].astimezone(pacific)
+        start_hour_index = relative_time.time().hour
+
+        day = relative_time.weekday()
+        #print(day)
+        if cur_day is None:
+            cur_day = day
+        elif cur_day != day:
+            cumulative_activity_time = sum(activity_clock)
+            if cur_day in activity_calendar:
+                activity_calendar[cur_day][week_period] += cumulative_activity_time
+            else:
+                if week_period == "week2":
+                    activity_calendar[cur_day] = {
+                        'week2' : cumulative_activity_time,
+                        'week1' : 0
+                    }
+                else:
+                    activity_calendar[cur_day] = {
+                        'week2' : 0,
+                        'week1' : cumulative_activity_time
+                    }
+            cur_day = day
+            if carry_over_clock[0] != 0:
+                activity_clock = carry_over_clock
+                carry_over_clock = create_clock()
+            else:
+                activity_clock = create_clock()
+
+        # print(start_hour_index)
+        duration = result[1]
+        while duration >= 3600 and carry_time is False:
+            activity_clock[start_hour_index] = 1
+            start_hour_index += 1
+            duration -= 3600
+            if start_hour_index >= 24:
+                start_hour_index = 0
+                carry_time = True
+
+        while duration >= 3600 and carry_time is True:
+            carry_over_clock[start_hour_index] = 1
+            duration -= 3600
+            start_hour_index += 1
+            if start_hour_index >= 24:
+                break
+
+        if duration >= 60 and carry_time is False:
+            if start_hour_index >= 24:
+                carry_time = True
+            hours = duration / 3600
+            activity_clock[start_hour_index] = max(activity_clock[start_hour_index],hours)
+
+        if duration >= 60 and carry_time is True:
+            if start_hour_index < 24:
+                hours = duration / 3600
+                carry_over_clock[start_hour_index] = max(carry_over_clock[start_hour_index],hours)
+
+        # print(activity_clock)
+        # print(carry_over_clock)
+        # print("\n")
+
+    cumulative_activity_time = sum(activity_clock)
+    if cur_day in activity_calendar:
+        activity_calendar[cur_day][week_period] += cumulative_activity_time
+    else:
+        if week_period == "week2":
+            activity_calendar[cur_day] = {
+                'week2' : cumulative_activity_time,
+                'week1' : 0
+            }
+        else:
+            activity_calendar[cur_day] = {
+                'week2' : 0,
+                'week1' : cumulative_activity_time
+            }
+
+    #print(activity_calendar)
+    return activity_calendar
+
+
+def get_user_activity(member_id, cur : db.extensions.cursor):
+    uid = get_user_id(member_id, cur)
+
+    activity_calendar = {}
+    # week 2
+    logger.info(f"Getting profile activity for user : {uid} from two weeks ago")
+    today = dt.datetime.now(timezone.utc)
+    from_time = today - dt.timedelta(weeks = 2)
+    to_time = today - dt.timedelta(weeks = 1)
+    
+    activity_calendar = process_activity_data(uid, from_time, to_time, "week2", activity_calendar, cur)
+
+    # week 1
+    logger.info(f"Getting profile activity for user : {uid} from one week ago")
+    from_time = today - dt.timedelta(weeks = 1)
+    to_time = today
+    
+    activity_calendar = process_activity_data(uid, from_time, to_time, "week1", activity_calendar, cur)
+
+    logger.info(activity_calendar)
+    #print(activity_calendar)
+    return activity_calendar
+
+    
+conn,cur = create_connection()
+get_user_activity(938183066948612096, cur)
+close_connection(conn,cur)       
 
 def add_cost(price):
     conn,cur = create_connection()

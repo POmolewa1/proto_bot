@@ -5,8 +5,8 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 import logging
-import datetime as dt
-from datetime import timezone
+# import datetime as dt
+# from datetime import timezone
 from SteamPractice import *
 from DBpractice import *
 import asyncio
@@ -14,6 +14,7 @@ from igdbPractice import *
 from discord.ext import tasks 
 import random
 from zoneinfo import ZoneInfo
+import calendar
 
 handler = logging.FileHandler(filename="discord.log", encoding="utf-8", mode ='w')
 logging.basicConfig(level= logging.DEBUG, handlers=[handler], format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -144,23 +145,81 @@ class ConfirmDeny(discord.ui.View):
         await interaction.response.edit_message(content="Got it. If the profile isn't the one you expected try searching by id name",embed=None,view=None) 
         self.stop()
 
+banner_color = {
+            1 : discord.Color.from_str("#444443"),
+            2 : discord.Color.from_str("#CD7801"),
+            3 : discord.Color.from_str("#FF0000"),
+            4 : discord.Color.from_str("#C9C902"),
+            5 : discord.Color.from_str("#00FF08"),
+            6 : discord.Color.from_str("#3300FF"),
+            7 : discord.Color.from_str("#CE00C0")
+        }
+
+activity_key = {
+            0 : "⬛",
+            1 : "🟨",
+            2 : "🟩",
+            3 : "🟦",
+            4 : "🟪"
+        }
 
 class GuildCard(discord.Embed):
     def __init__(self, user):
         super().__init__()
         self.profile_picture = user.display_avatar.url
         self.user_name = user.display_name
+        self.banner_color = None
 
-    def server_stats_card(self, recent_game_name, recent_game_image_url, profile_data):
+    def server_stats_card(self, activity_data, recent_game_name, recent_game_image_url, profile_data):
+        
+
         self.title = f"{self.user_name}"
         self.set_thumbnail(url = self.profile_picture)
-        self.color = discord.Color.from_str("#444443")
+        self.banner_color = banner_color[profile_data[3]]
+        self.color = self.banner_color
 
         self.description = (
-            f"### Level {profile_data[3]} - Rooky \n"
+            f"### Level {profile_data[3]} - Rookie \n"
             f"### XP : {profile_data[4]} / {profile_data[3] * 100}\n\n"
         )
 
+        self.add_field(name = "Weekly Activity - 📅", value= "-" * 52, inline=False)
+        self.add_field(
+                    name="Activity Key",
+                    value=(
+                        "```text\n"
+                        "⬛ <1h    "
+                        "🟨 1-2h   "
+                        "🟩 2-3h   \n"
+                        "🟦 3-5h   "
+                        "🟪 5h+  "
+                        "(2 week avg.)"
+                        "```\n"
+                    ),
+                    inline=False
+                )
+        print(activity_data)
+        for i in range(7):
+            day = calendar.day_abbr[i]
+            
+            if i in activity_data:
+                week2_data = activity_data[i]['week2']
+                week1_data = activity_data[i]['week1']
+                activity_color = (week2_data + week1_data)/2
+
+                if activity_color > 5:
+                    activity_color = 4
+                elif activity_color > 3 and activity_color <= 5:
+                    activity_color = 3
+                elif activity_color > 2 and activity_color <= 3:
+                    activity_color = 2
+                elif activity_color > 1 and activity_color <= 2:
+                    activity_color = 1
+                else:
+                    activity_color = 0
+
+            self.add_field(name=f"{day}:", value= activity_key[activity_color])
+                
         stream_time = format_timedelta(dt.timedelta(seconds = profile_data[1]))
         call_time = format_timedelta(dt.timedelta(seconds = profile_data[2]))
         game_time = format_timedelta(dt.timedelta(seconds = profile_data[5]))
@@ -194,11 +253,12 @@ class GuildCard(discord.Embed):
     def steam_stats_card(self, steam_data):
         # [account_name, creation_time, steam_games_count, account_cost, total_steam_time, last_sync, profile_pic, most_played_game_dict]
         self.title = "Steam Stats"
+        self.color = self.banner_color
         self.set_thumbnail(url = steam_data[6])
         self.description = (
             f"### {steam_data[0]}"
         )
-
+        
         self.add_field(name=f"General Server Stats", value= "-" * 52, inline=False)
 
         today = dt.datetime.now(timezone.utc)
@@ -210,7 +270,7 @@ class GuildCard(discord.Embed):
         account_cost = steam_data[3]
 
         total_steam_time = format_timedelta(dt.timedelta(seconds = steam_data[4]))
-        last_sync = steam_data[5]
+        last_sync = steam_data[5].date()
 
         game_name = ""
         if len(steam_data[7]) == 0:
@@ -228,11 +288,11 @@ class GuildCard(discord.Embed):
             value=(
                 "```text\n"
                 f"🕰️ Account Age ---  {creation_time}\n\n" 
-                f"---------------------------------"
+                f"---------------------------------\n"
                 f"📚 Games in Library   ---  {steam_games_count}\n\n"
-                f"---------------------------------"
+                f"---------------------------------\n"
                 f"💵 Aprox. Libray value\n        ${account_cost}\n\n" 
-                f"---------------------------------"
+                f"---------------------------------\n"
                 f"👾 Total Game Time   ---  {total_steam_time}\n\n"
                 "```\n"
             )
@@ -248,6 +308,7 @@ class GuildCard(discord.Embed):
         # if we don't have a game library then don't make this
 
         self.title = f"{self.user_name}"
+        self.color = self.banner_color
         self.set_thumbnail(url = self.profile_picture)
 
         end_index = start_index + 25
@@ -472,8 +533,9 @@ def create_server_profile_card(user, guild_id):
     conn,cur = create_connection()
     game_name, game_pic = get_recently_played_game_img(user.id, cur)
     pdata = get_user_server_stats(user.id, guild_id, cur)
+    activity_data = get_user_activity(user.id, cur)
     card = GuildCard(user)
-    card.server_stats_card(game_name, game_pic, pdata)
+    card.server_stats_card(activity_data, game_name, game_pic, pdata)
     close_connection(conn,cur)
 
     return card
