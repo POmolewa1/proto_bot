@@ -164,11 +164,11 @@ activity_key = {
         }
 
 class GuildCard(discord.Embed):
-    def __init__(self, user):
+    def __init__(self, user, banner_color = None):
         super().__init__()
         self.profile_picture = user.display_avatar.url
         self.user_name = user.display_name
-        self.banner_color = None
+        self.banner_color = banner_color
 
     def server_stats_card(self, activity_data, recent_game_name, recent_game_image_url, profile_data):
         
@@ -541,7 +541,7 @@ def create_server_profile_card(user, guild_id):
     return card
 
 
-def create_game_library_card(user):
+def create_game_library_card(user, b_color):
     library_pages = []
 
     conn,cur = create_connection()
@@ -552,7 +552,7 @@ def create_game_library_card(user):
 
     # Embeds only allow a max of 25 items so this allows us to display games in batches of 25 per page
     while(start_index < max_index):
-        card = GuildCard(user)
+        card = GuildCard(user, b_color)
         card.game_library_card(library,start_index)
         library_pages.append(card)
         start_index += 25
@@ -561,11 +561,11 @@ def create_game_library_card(user):
 
     return library_pages
 
-def create_steam_card(user):
+def create_steam_card(user, b_color):
     conn,cur = create_connection()
     steam_stats = get_user_steam_stats(user.id, cur)
     close_connection(conn,cur)
-    steam_card = GuildCard(user)
+    steam_card = GuildCard(user, b_color)
     steam_card.steam_stats_card(steam_stats)
 
     return steam_card
@@ -702,8 +702,9 @@ async def guildcard(interaction: discord.Interaction, user: discord.Member):
     #picture = Embedding("http://images.igdb.com/igdb/image/upload/t_thumb/co904o.jpg")
 
     server_stats_card = create_server_profile_card(user, interaction.guild.id)
-    library_stats_card = create_game_library_card(user)
-    steam_card = create_steam_card(user)
+    b_color = server_stats_card.banner_color
+    library_stats_card = create_game_library_card(user, b_color)
+    steam_card = create_steam_card(user, b_color)
     view = PageChange(server_stats_card, steam_card, library_stats_card)
 
     await interaction.followup.send(f"Here is {user_name}'s profile", embed = server_stats_card, view = view)
