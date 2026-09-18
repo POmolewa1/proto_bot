@@ -344,6 +344,72 @@ class Embedding(discord.Embed):
         self.add_field(name="Games",value="🎮 Terraria\n🎮 Baldur's Gate 3\n🎮 Castlevania",inline=False)
         self.add_field(name="Favorite Game", value="Terraria")
 
+class WeekBreakdown(discord.Embed):
+    def __init__(self, server_data):
+        super().__init__()
+
+        self.title = "Weekly Breakdown"
+        self.description = " "
+        self.add_field(
+            name=(
+                "\n"
+                "Games Played This Week\n"
+                "-------------------------------------\n"
+            ), 
+            value = ""
+        )
+        game_list = list(server_data['games'].items())
+        total_games = len(game_list)
+        if total_games > 17:
+            game_list = game_list[ : 18]
+
+        for game_name, game_data in game_list:
+            self.add_field(
+                name=f"🎲 {game_name}", 
+                value= (
+                    create_string(game_data)
+                ),
+                inline= False
+            )
+
+        if server_data['top_game']['name'] is not None:
+            name = server_data['top_game']['name']
+            time = server_data['top_game']['time']
+            time = format_timedelta(dt.timedelta(seconds = time))
+            img = server_data['top_game']['img']
+            if img:
+                self.set_image(url=img)
+            self.add_field(name="Most Popular Game", value=f"{name} - {time}", inline=False)
+        else:
+            self.add_field(name="Most Popular Game", value=f"N/A - N/A", inline=False)
+
+        
+
+def create_string(single_game_data):
+    string = (
+        "```text\n"
+        f"{'Name' : <20} | {'Time' : >6}\n"
+        "---------------------------------\n"
+    )
+
+    total_time = 0
+    for user in single_game_data:
+        discord_name = client.get_user(user).display_name
+        time_played = single_game_data[user]
+        total_time += time_played
+        
+        time_played = format_timedelta(dt.timedelta(seconds = time_played))
+        string += f"{discord_name:<20} | {time_played:>6}\n"
+        
+    total_time = format_timedelta(dt.timedelta(seconds = total_time))
+    string += (
+        f"\n{'total:' : <22} {total_time : >6}\n"
+        "```"
+    )
+
+    
+    return string
+
 
 class SampleDiscordProfile(discord.Embed):
     def __init__(self, profile_details):
@@ -383,6 +449,12 @@ class Client(commands.Bot):
             #await message.channel.send(f"Hi there {message.author.display_name}", embed = self.e)
             #await message.channel.send(f"Hi there {message.author.display_name}", embeds = [self.e,self.e,self.e,self.e])
             #await message.channel.send(f"Hi there {message.author.display_avatar.url}")
+            # print(message.author.guild.id)
+        await mvp_process(message.author.guild)
+        
+        # conn,cur = create_connection()
+        # restart_tracked_activities(cur)
+        # close_connection(conn,cur)
 
 
     async def on_reaction_add(self, reaction, user):
@@ -481,6 +553,26 @@ class Client(commands.Bot):
 
 # Bot command helpers
 #-----------------
+async def mvp_process(guild : discord.Guild):
+    channel = guild.get_channel(int(os.getenv("CHANNEL2_ID")))
+    conn, cur = create_connection()
+    server_data, mvp_data = get_week_long_server_data(guild.id, cur)
+    close_connection(conn, cur)
+    weekly_card = WeekBreakdown(server_data)
+
+    await channel.send("Here's the weekly breakdown brought to you by yours truly", embed=weekly_card)
+
+
+
+def create_guild_cards(user, interaction):
+    server_stats_card = create_server_profile_card(user, interaction.guild.id)
+    b_color = server_stats_card.banner_color
+    library_stats_card = create_game_library_card(user, b_color)
+    steam_card = create_steam_card(user, b_color)
+
+    return server_stats_card, library_stats_card, steam_card
+
+
 def format_timedelta(td):
     total_minutes = int(td.total_seconds() // 60)
 
@@ -561,6 +653,7 @@ def create_game_library_card(user, b_color):
 
     return library_pages
 
+
 def create_steam_card(user, b_color):
     conn,cur = create_connection()
     steam_stats = get_user_steam_stats(user.id, cur)
@@ -570,7 +663,6 @@ def create_steam_card(user, b_color):
 
     return steam_card
     # come back here
-
 
 
 def create_response(url, user_list):
@@ -701,10 +793,12 @@ async def guildcard(interaction: discord.Interaction, user: discord.Member):
     #picture = Embedding("https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/2369900/header.jpg?t=1745815495")
     #picture = Embedding("http://images.igdb.com/igdb/image/upload/t_thumb/co904o.jpg")
 
-    server_stats_card = create_server_profile_card(user, interaction.guild.id)
-    b_color = server_stats_card.banner_color
-    library_stats_card = create_game_library_card(user, b_color)
-    steam_card = create_steam_card(user, b_color)
+    # server_stats_card = create_server_profile_card(user, interaction.guild.id)
+    # b_color = server_stats_card.banner_color
+    # library_stats_card = create_game_library_card(user, b_color)
+    # steam_card = create_steam_card(user, b_color)
+
+    server_stats_card, steam_card, library_stats_card = await asyncio.to_thread(create_guild_cards, user, interaction)
     view = PageChange(server_stats_card, steam_card, library_stats_card)
 
     await interaction.followup.send(f"Here is {user_name}'s profile", embed = server_stats_card, view = view)

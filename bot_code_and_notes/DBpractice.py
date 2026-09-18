@@ -140,7 +140,8 @@ def initialize_db():
         total_call_time INT DEFAULT 0,
 
         guild_level INT DEFAULT 1,
-        xp INT DEFAULT 0
+        xp INT DEFAULT 0,
+        mvp_mult INT DEFAULT 100
     );
     """)
     logger.info(f"Verified table: guilds_users")
@@ -623,6 +624,8 @@ def end_game_tracker(member_id, game_name, activity_type, guild_id, cur : db.ext
     today = dt.datetime.now(tz = timezone.utc)
     start_time = result[0]
     time_played = (today - start_time).total_seconds()
+    if time_played < 0:
+        time_played = 0
     # Make sure to add a tracking limit here maybe 12 hours?
     total_time = time_in_game + time_played
 
@@ -650,6 +653,8 @@ def end_voice_tracker(member_id, activity_type, guild_id, cur : db.extensions.cu
     today = dt.datetime.now(tz = timezone.utc)
     start_time = result[0]
     time_tracked = (today - start_time).total_seconds()
+    if time_tracked < 0:
+        time_tracked = 0
     # Total time for streaming and call will be in guilds_users
 
     if activity_type == "IN CALL":
@@ -1679,10 +1684,158 @@ def get_user_activity(member_id, cur : db.extensions.cursor):
     #print(activity_calendar)
     return activity_calendar
 
+def get_total_weekly_messages(uid, guild_id, cur : db.extensions.cursor):
+    cur.execute(
+        """SELECT messages_sent_this_week FROM guilds_users
+            WHERE guild_id = %s
+            AND user_id = %s
+        """,(guild_id, uid)
+    )
+
+    result = cur.fetchone()
+    if result is None:
+        logger.warning(f"Could not find message data for user : {uid}")
+        return 0
+
+    return result[0]
+
+def get_mvp_scaling(uid, guild_id, cur : db.extensions.cursor):
+    cur.execute(
+        """SELECT mvp_mult FROM guilds_users
+            WHERE guild_id = %s
+            AND user_id = %s
+        """,(guild_id, uid)
+    )
+
+    result = cur.fetchone()
+    if result is None:
+        logger.warning(f"Could not find message data for user : {uid}")
+        return 100
+
+    return result[0]
+
+
+def create_mvp_entry(mvp_data, discord_id, uid, guild_id, cur):
+
+    mvp_data[discord_id] = {
+        'playtime' : 0,
+        'call_time' : 0,
+        'stream_time' : 0,
+        'messages' : get_total_weekly_messages(uid, guild_id, cur),
+        'mvp_mult': get_mvp_scaling(uid, guild_id, cur)
+    }
+
+
+def get_week_long_server_data(guild_id, cur : db.extensions.cursor):
+    server_data = {
+        'games' : {},
+        'call' : {},
+        'stream' : {},
+        'top_game' : {
+            'name' : None,
+            'img' : None,
+            'time' : 0
+        }
+    }
+
+    mvp_data = {}
+    end_date = dt.datetime.now(timezone.utc) - dt.timedelta(weeks = 1)
+    cur.execute(
+        """SELECT * FROM server_log
+            WHERE guild_id = %s
+            AND start_time >= %s
+            ORDER BY start_time DESC
+        """,(guild_id,end_date)
+    )
+
+    results = cur.fetchall()
+
+    if not results:
+        logger.warning(f"Could not find data for guild id : {guild_id}")
+        return None
+
+    for result in results:
+        activity_type = result[4]
+
+        if activity_type == "PLAYING":
+            gid = result[3]
+            uid = result[2]
+            discord_id = get_member_id(uid, cur)
+            game_name = get_game_name_from_id(gid, cur)
+            activity_time = result[5]
+
+            server_data['games'].setdefault(game_name, {}).setdefault(discord_id, 0)
+
+            server_data['games'][game_name][discord_id] += activity_time
+
+            if discord_id not in mvp_data:
+                create_mvp_entry(mvp_data, discord_id, uid, guild_id, cur)
+            
+            mvp_data[discord_id]['playtime'] += activity_time
+
+        elif activity_type == "IN CALL":
+            uid = result[2]
+            discord_id = get_member_id(uid, cur)
+            activity_time = result[5]
+
+            server_data['call'].setdefault(discord_id, 0)
+
+            server_data['call'][discord_id] += activity_time
+
+            if discord_id not in mvp_data:
+                create_mvp_entry(mvp_data, discord_id, uid, guild_id, cur)
+            
+            mvp_data[discord_id]['call_time'] += activity_time
+
+        elif activity_type == "STREAMING":
+            uid = result[2]
+            discord_id = get_member_id(uid, cur)
+            activity_time = result[5]
+
+            server_data['stream'].setdefault(discord_id, 0)
+
+            server_data['stream'][discord_id] += activity_time
+
+            if discord_id not in mvp_data:
+                create_mvp_entry(mvp_data, discord_id, uid, guild_id, cur)
+            
+            mvp_data[discord_id]['stream_time'] += activity_time
+
     
-conn,cur = create_connection()
-get_user_activity(938183066948612096, cur)
-close_connection(conn,cur)       
+    top_game = None
+    top_time = 0
+
+    game_list = list(server_data['games'].items())
+
+    for game_name, game_data in game_list:
+        cur_game = game_name
+        cur_time = 0
+        for user in game_data:
+            cur_time += game_data[user]
+
+        if cur_time > top_time:
+            top_game = cur_game
+            top_time = cur_time
+
+    if top_game is not None:
+        server_data['top_game']['name'] = top_game
+
+        gid = get_game_id_from_name(top_game, cur)
+        server_data['top_game']['img'] = get_game_img(gid, cur)
+
+        server_data['top_game']['time'] = top_time
+
+    print(server_data)
+    print('\n')
+    print(mvp_data)
+    print('\n')
+
+    return(server_data, mvp_data)
+
+
+# conn,cur = create_connection()
+# get_week_long_server_data(1534754711536799864, cur)
+# close_connection(conn,cur)       
 
 def add_cost(price):
     conn,cur = create_connection()
