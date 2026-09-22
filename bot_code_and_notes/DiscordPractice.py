@@ -62,21 +62,21 @@ class PageChange(discord.ui.View):
             case 2:
                 if not started_on_page:
                     self.library_page = self.last_page
-                    await interaction.response.edit_message(content = "", embed = self.game_library_card[self.library_page], view = self)
+                    await interaction.response.edit_message(embed = self.game_library_card[self.library_page], view = self)
                     return
                 if self.library_page == 0:
                     self.curr_page = 1
-                    await interaction.response.edit_message(content="", embed= self.steam_stats_card, view = self)
+                    await interaction.response.edit_message(embed= self.steam_stats_card, view = self)
                     return
 
                 self.library_page -= 1
-                await interaction.response.edit_message(content="", embed= self.game_library_card[self.library_page], view = self)
+                await interaction.response.edit_message(embed= self.game_library_card[self.library_page], view = self)
 
             case 1:
-                await interaction.response.edit_message(content="", embed= self.steam_stats_card, view = self)
+                await interaction.response.edit_message(embed= self.steam_stats_card, view = self)
 
             case 0:
-                await interaction.response.edit_message(content="", embed= self.server_stats_card, view = self)
+                await interaction.response.edit_message(embed= self.server_stats_card, view = self)
 
 
     @discord.ui.button(label = "Next", style = discord.ButtonStyle.blurple)
@@ -90,21 +90,21 @@ class PageChange(discord.ui.View):
             case 2:
                 if not started_on_page:
                     self.library_page = 0
-                    await interaction.response.edit_message(content="", embed= self.game_library_card[self.library_page], view = self)
+                    await interaction.response.edit_message(embed= self.game_library_card[self.library_page], view = self)
                     return
 
                 if self.library_page == self.last_page:
                     self.library_page = 0
                     #change to 0
                     self.curr_page = 0
-                    await interaction.response.edit_message(content="", embed= self.server_stats_card, view = self)
+                    await interaction.response.edit_message(embed= self.server_stats_card, view = self)
                     return
             
                 self.library_page += 1
-                await interaction.response.edit_message(content="", embed= self.game_library_card[self.library_page], view = self)
+                await interaction.response.edit_message(embed= self.game_library_card[self.library_page], view = self)
 
             case 1:
-                await interaction.response.edit_message(content="", embed= self.steam_stats_card, view = self)
+                await interaction.response.edit_message(embed= self.steam_stats_card, view = self)
 
 
 class ConfirmDeny(discord.ui.View):
@@ -183,7 +183,7 @@ class GuildCard(discord.Embed):
             f"### XP : {profile_data[4]} / {profile_data[3] * 100}\n\n"
         )
 
-        self.add_field(name = "Weekly Activity - 📅", value= "-" * 52, inline=False)
+        self.add_field(name = "📅 - Weekly Activity", value= "-" * 52, inline=False)
         self.add_field(
                     name="Activity Key",
                     value=(
@@ -198,10 +198,10 @@ class GuildCard(discord.Embed):
                     ),
                     inline=False
                 )
-        print(activity_data)
+        #print(activity_data)
         for i in range(7):
             day = calendar.day_abbr[i]
-            
+            activity_color = 0
             if i in activity_data:
                 week2_data = activity_data[i]['week2']
                 week1_data = activity_data[i]['week1']
@@ -222,26 +222,29 @@ class GuildCard(discord.Embed):
                 
         stream_time = format_timedelta(dt.timedelta(seconds = profile_data[1]))
         call_time = format_timedelta(dt.timedelta(seconds = profile_data[2]))
-        game_time = format_timedelta(dt.timedelta(seconds = profile_data[5]))
+        game_time = format_timedelta(dt.timedelta(seconds = profile_data[8]))
         messages = profile_data[0]
         # self.add_field(name = "🎥 Stream Time", value = stream_time, inline=True)
         # self.add_field(name = "🔊 Call Time", value = call_time, inline=True)
         # self.add_field(name = "🔊 Playtime", value = call_time, inline=True)
         # self.add_field(name = "📨 Messages Sent", value = f"{messages}", inline=True)
         # self.add_field(name="Most Recent Game", value="", inline=False)
-        self.add_field(name=f"General Server Stats", value= "-" * 52, inline=False)
+        self.add_field(name=f"📊 - General Server Stats", value= "-" * 52, inline=False)
         self.add_field(
-            name="\u200b",
+            name=" ",
             value=(
                 "```text\n"
-                f"🎥 Stream Time ---  {stream_time}\n\n" 
-                f"🔊 Call Time   ---  {call_time}\n\n" 
-                f"🕹️ Game Time   ---  {game_time}\n\n"
-                f"📨 Messages    ---  {messages}\n\n"
+                f"{"🎥 Stream :" :<10} {stream_time :>8}\n\n" 
+                f"{"🔊 Voice :" :<10} {call_time :>8}\n\n" 
+                f"{"🕹️ Gaming :" :<10} {game_time :>8}\n\n"
+                f"{"📨 Messages :" :<10} {messages :>6}\n\n"
+                f"         MVPS\n"
+                "--------------------------\n"
+                f"🏆 : {profile_data[5]} | 🥈: {profile_data[6]} | 🥉: {profile_data[7]}   {"|" :>10}\n"
                 "```\n"
             )
         )
-
+        
         if recent_game_name is None:
             recent_game_name = "N/A"
         if recent_game_image_url is not None:
@@ -254,12 +257,20 @@ class GuildCard(discord.Embed):
         # [account_name, creation_time, steam_games_count, account_cost, total_steam_time, last_sync, profile_pic, most_played_game_dict]
         self.title = "Steam Stats"
         self.color = self.banner_color
+
+        self.add_field(name=f"General Steam Stats", value= "-" * 52, inline=False)
+        if steam_data is None:
+            self.description = (
+                f"### Steam Profile"
+            )
+            self.add_field(name=f"Steam Profile Not Linked", value= "If you would like to link steam please do so", inline=False)
+            return
+
         self.set_thumbnail(url = steam_data[6])
         self.description = (
             f"### {steam_data[0]}"
         )
         
-        self.add_field(name=f"General Server Stats", value= "-" * 52, inline=False)
 
         today = dt.datetime.now(timezone.utc)
         age = relativedelta(today, steam_data[1])
@@ -311,6 +322,14 @@ class GuildCard(discord.Embed):
         self.color = self.banner_color
         self.set_thumbnail(url = self.profile_picture)
 
+        if game_library is None or len(game_library) == 0:
+            self.add_field(
+                name="Wow much empty...", 
+                value="", 
+                inline=False
+            )
+            return
+
         end_index = start_index + 25
         if end_index > len(game_library):
             end_index = len(game_library)
@@ -345,32 +364,83 @@ class Embedding(discord.Embed):
         self.add_field(name="Favorite Game", value="Terraria")
 
 class WeekBreakdown(discord.Embed):
-    def __init__(self, server_data):
+    def __init__(self, server_data, guild):
         super().__init__()
 
         self.title = "Weekly Breakdown"
         self.description = " "
+
+        stream_data = sorted(
+            server_data['stream'].items(),
+            key = lambda x : x[1],
+            reverse = True
+        )
+        self.add_field(
+            name=(
+                "\n"
+                "Time Streamed\n"
+                "-------------------------------------\n"
+            ), 
+            value = create_string_from_list(stream_data, guild),
+            inline=False
+        )
+
+        call_data = sorted(
+            server_data['call'].items(),
+            key = lambda x : x[1],
+            reverse = True
+        )
+
+        self.add_field(
+            name=(
+                "\n"
+                "Time In Call\n"
+                "-------------------------------------\n"
+            ), 
+            value = create_string_from_list(call_data, guild),
+            inline=False
+        )
+
         self.add_field(
             name=(
                 "\n"
                 "Games Played This Week\n"
                 "-------------------------------------\n"
             ), 
-            value = ""
+            value = "",
+            inline=False
         )
-        game_list = list(server_data['games'].items())
+        #game_list = list(server_data['games'].items())
+        game_list = sorted(
+            server_data['games'].items(),
+            key = lambda x : x[1]['total_time'],
+            reverse = True
+        )
+
+        if len(game_list) == 0:
+            return
+        
         total_games = len(game_list)
         if total_games > 17:
             game_list = game_list[ : 18]
 
         for game_name, game_data in game_list:
-            self.add_field(
-                name=f"🎲 {game_name}", 
-                value= (
-                    create_string(game_data)
-                ),
-                inline= False
-            )
+            if game_name == game_list[0][0]:
+                self.add_field(
+                    name=f"🌟 {game_name}", 
+                    value= (
+                        create_string(game_data['players'], game_data['total_time'], guild)
+                    ),
+                    inline= False
+                )
+            else:
+                self.add_field(
+                    name=f"🎲 {game_name}", 
+                    value= (
+                        create_string(game_data['players'], game_data['total_time'], guild)
+                    ),
+                    inline= False
+                )
 
         if server_data['top_game']['name'] is not None:
             name = server_data['top_game']['name']
@@ -383,9 +453,10 @@ class WeekBreakdown(discord.Embed):
         else:
             self.add_field(name="Most Popular Game", value=f"N/A - N/A", inline=False)
 
-        
 
-def create_string(single_game_data):
+def create_string_from_list(item_list, guild):
+    if len(item_list) == 0:
+        return " "
     string = (
         "```text\n"
         f"{'Name' : <20} | {'Time' : >6}\n"
@@ -393,9 +464,9 @@ def create_string(single_game_data):
     )
 
     total_time = 0
-    for user in single_game_data:
-        discord_name = client.get_user(user).display_name
-        time_played = single_game_data[user]
+    for user, data in item_list:
+        discord_name = guild.get_member(user).display_name
+        time_played = data
         total_time += time_played
         
         time_played = format_timedelta(dt.timedelta(seconds = time_played))
@@ -407,7 +478,38 @@ def create_string(single_game_data):
         "```"
     )
 
-    
+    return string
+
+        
+def create_string(single_game_data, t_time, guild : discord.Guild):
+    if len(single_game_data) == 0:
+        return " "
+    string = (
+        "```text\n"
+        f"{'Name' : <20} | {'Time' : >6}\n"
+        "---------------------------------\n"
+    )
+
+    #total_time = 0
+    sorted_game_data = sorted(
+        single_game_data.items(),
+        key = lambda x : x[1],
+        reverse = True
+    )
+
+    for user, ply_time in sorted_game_data:
+        discord_name = guild.get_member(user).display_name
+        time_played = ply_time
+        
+        time_played = format_timedelta(dt.timedelta(seconds = time_played))
+        string += f"{discord_name:<20} | {time_played:>6}\n"
+        
+    total_time = format_timedelta(dt.timedelta(seconds = t_time))
+    string += (
+        f"\n{'total:' : <22} {total_time : >6}\n"
+        "```"
+    )
+
     return string
 
 
@@ -419,6 +521,7 @@ class SampleDiscordProfile(discord.Embed):
         self.url = profile_details['player']['profileurl']
         self.set_image(url=profile_details['player']['avatarfull'])
 
+
 class Client(commands.Bot):
     #e = Embedding("https://cdn.discordapp.com/avatars/385277889404207105/fb8b1cae3be44ba623caee0610343864.png?size=1024")
     async def on_ready(self):
@@ -428,9 +531,12 @@ class Client(commands.Bot):
         self.verify_guilds_and_members()
 
         try:
-            guild = discord.Object(id = os.getenv("GUILD_ID"))
-            synced = await self.tree.sync(guild=guild)
-            print(f"Synced {len(synced)} commands to guild {guild.id}")
+            # guild = discord.Object(id = os.getenv("GUILD_ID"))
+            # synced = await self.tree.sync(guild=guild)
+            # print(f"Synced {len(synced)} commands to guild {guild.id}")
+            synced = await self.tree.sync()
+            print(f"Synced {len(synced)} commands to all guilds")
+            
         except Exception as e:
             print(f"Error syncing commands: {e}")
 
@@ -438,10 +544,10 @@ class Client(commands.Bot):
             get_game_news.start()
 
 
-
-    async def on_message(self, message):
+    async def on_message(self, message : discord.Message):
         # when a person says a message they gain xp
         #print(f"Message from {message.author}: {message.content}")
+        
         if message.author == self.user:
             return
         if message.content.startswith("hello"):
@@ -450,7 +556,11 @@ class Client(commands.Bot):
             #await message.channel.send(f"Hi there {message.author.display_name}", embeds = [self.e,self.e,self.e,self.e])
             #await message.channel.send(f"Hi there {message.author.display_avatar.url}")
             # print(message.author.guild.id)
-        await mvp_process(message.author.guild)
+        conn,cur = create_connection()
+        update_user_message_count(message.author.id, message.guild.id, cur)
+        close_connection(conn,cur)
+
+        await mvp_process(message.guild)
         
         # conn,cur = create_connection()
         # restart_tracked_activities(cur)
@@ -503,7 +613,9 @@ class Client(commands.Bot):
         conn,cur = create_connection()
         total_guilds = self.guilds
         bot_profile_id = self.user.id
-        verify_member_in_database(total_guilds, bot_profile_id, cur)
+        #d.channels
+        
+        verify_members_and_channels_in_database(total_guilds, bot_profile_id, cur)
         close_connection(conn,cur)
 
         print("All guilds and members verified")
@@ -548,29 +660,234 @@ class Client(commands.Bot):
         #print(before)
         #print(type(after))
         #print(after)
-        
+    async def on_guild_join(self, guild : discord.Guild):
+        print(f"Just joined {guild.name} id : {guild.id}")
 
+        await asyncio.to_thread(self.verify_guilds_and_members)
+        
+        
+aaaa = {
+    "Alex": {
+        "playtime": 4820,
+        "call_time": 1630,
+        "stream_time": 740,
+        "messages": 18,
+        "mvp_mult": 100,
+        "score": 0
+    },
+    "Jordan": {
+        "playtime": 3150,
+        "call_time": 920,
+        "stream_time": 450,
+        "messages": 25,
+        "mvp_mult": 100,
+        "score": 0
+    },
+    "Sam": {
+        "playtime": 2100,
+        "call_time": 1440,
+        "stream_time": 360,
+        "messages": 12,
+        "mvp_mult": 110,
+        "score": 0
+    },
+    "Taylor": {
+        "playtime": 1650,
+        "call_time": 720,
+        "stream_time": 120,
+        "messages": 20,
+        "mvp_mult": 100,
+        "score": 0
+    },
+    "Morgan": {
+        "playtime": 980,
+        "call_time": 1800,
+        "stream_time": 540,
+        "messages": 25,
+        "mvp_mult": 90,
+        "score": 0
+    },
+    "Chris": {
+        "playtime": 4200,
+        "call_time": 300,
+        "stream_time": 0,
+        "messages": 8,
+        "mvp_mult": 105,
+        "score": 0
+    },
+    "Jamie": {
+        "playtime": 1350,
+        "call_time": 600,
+        "stream_time": 900,
+        "messages": 16,
+        "mvp_mult": 100,
+        "score": 0
+    },
+    "Riley": {
+        "playtime": 2700,
+        "call_time": 480,
+        "stream_time": 180,
+        "messages": 25,
+        "mvp_mult": 95,
+        "score": 0
+    },
+    "Casey": {
+        "playtime": 750,
+        "call_time": 2100,
+        "stream_time": 300,
+        "messages": 14,
+        "mvp_mult": 100,
+        "score": 0
+    },
+    "Caiatl, Empress of Cabussy": {
+        "playtime": 3600,
+        "call_time": 1080,
+        "stream_time": 660,
+        "messages": 22,
+        "mvp_mult": 115,
+        "score": 0
+    }
+}
+
+# bbbb = {
+#     "Alex": "(37.49 + 9.06 + 0.82 + 18.00) * 1.00 = 65.37",
+#     "Jordan": "(24.50 + 5.11 + 0.50 + 25.00) * 1.00 = 55.11",
+#     "Sam": "(16.33 + 8.00 + 0.40 + 12.00) * 1.10 = 40.40",
+#     "Taylor": "(12.83 + 4.00 + 0.13 + 20.00) * 1.00 = 36.96",
+#     "Morgan": "(7.62 + 10.00 + 0.60 + 25.00) * 0.90 = 38.90",
+#     "Chris": "(32.67 + 1.67 + 0.00 + 8.00) * 1.05 = 44.45",
+#     "Jamie": "(10.50 + 3.33 + 1.00 + 16.00) * 1.00 = 30.83",
+#     "Riley": "(21.00 + 2.67 + 0.20 + 25.00) * 0.95 = 46.92",
+#     "Casey": "(5.83 + 11.67 + 0.33 + 14.00) * 1.00 = 31.83",
+#     "Caiatl, Empress of Cabussy": "(28.00 + 6.00 + 0.73 + 22.00) * 1.15 = 65.13"
+# }
 
 # Bot command helpers
 #-----------------
+def calculate_mvp_score(mvp_data):
+    user_score_breakdown = {}
+
+    for user in mvp_data:
+        playtime_score = (mvp_data[user]['playtime'] / 900) * 2
+        call_time_score = (mvp_data[user]['call_time'] / 900) * 4
+        stream_time_score = (mvp_data[user]['stream_time'] / 900) * 6
+        messages_score = min(mvp_data[user]['messages'], 20) 
+        score_mult = mvp_data[user]['mvp_mult'] / 100
+
+        mvp_data[user]['score'] = (playtime_score + call_time_score + stream_time_score + messages_score) * score_mult
+
+        user_score_breakdown[user] = f"({playtime_score: .2f} +{call_time_score: .2f} +{stream_time_score: .2f} +{messages_score}) *{score_mult: .2f} = {mvp_data[user]['score']: .2f}"
+
+    print(mvp_data)
+    print('\n')
+    print(user_score_breakdown)
+
+    return user_score_breakdown
+
+def create_mvp_breakdown_message(leaderboard, user_score_breakdown, guild : discord.Guild):
+    # add more to this later
+    string = (
+            "```text\n"
+            f"Point calculation:\n(playtime + call time + stream time + messages) * score_mult\n\n"
+            "🏆 WEEKLY MVP\n"
+            "────────────────────────────────────────\n\n"
+        )
+
+    # for i, (user, _) in enumerate(leaderboard):
+    #     match i:
+    #         case 0:
+    #             string += f"🥇 {guild.get_member(user).display_name : <20} {user_score_breakdown[user]}\n"
+    #         case 1:
+    #             string += f"🥈 {guild.get_member(user).display_name : <20} {user_score_breakdown[user]}\n"
+    #         case 2:
+    #             string += f"🥉 {guild.get_member(user).display_name : <20} {user_score_breakdown[user]}\n"
+    #         case _:
+    #             string += f"{i + 1}. {guild.get_member(user).display_name : <20} {user_score_breakdown[user]}\n"
+
+    for i, (user, _) in enumerate(leaderboard):
+        match i:
+            case 0:
+                string += f"{"🥇":<3} {guild.get_member(user).display_name : <20}\n{user_score_breakdown[user]}\n\n"
+            case 1:
+                string += f"{"🥈":<3} {guild.get_member(user).display_name : <20}\n{user_score_breakdown[user]}\n\n"
+            case 2:
+                string += f"{"🥉":<3} {guild.get_member(user).display_name : <20}\n{user_score_breakdown[user]}\n\n"
+            case _:
+                string += f"{i + 1}.   {guild.get_member(user).display_name : <20}\n{user_score_breakdown[user]}\n\n"
+
+    string += (
+        f"Congrats {guild.get_member(leaderboard[0][0]).display_name} on being this weeks mvp"
+    )
+
+    string += "```"
+
+    return string
+
+
 async def mvp_process(guild : discord.Guild):
     channel = guild.get_channel(int(os.getenv("CHANNEL2_ID")))
     conn, cur = create_connection()
-    server_data, mvp_data = get_week_long_server_data(guild.id, cur)
+    
+    server_data, mvp_data = get_week_long_server_data(guild, cur)
+    
+
+    #user_score_breakdown = bbbb
+    # mvp_data = aaaa
+    if server_data is None:
+        return
+    if len(server_data) == 0:
+        return
+    
+    user_score_breakdown = calculate_mvp_score(mvp_data)
+    
+    #contestants = list(user_score_breakdown.items())
+    contestants = sorted(
+        mvp_data.items(),
+        key = lambda x : x[1]['score'],
+        reverse = True
+    )
+
+    placements = len(contestants)
+    if placements >= 4:
+        placements = 3
+
+    for place in range(placements):
+        if place == 0:
+            update_user_mvp_data(contestants[place][0], guild.id, place, cur)
+        else:
+            update_user_mvp_data(contestants[place][0], guild.id, place, cur)
+            
     close_connection(conn, cur)
-    weekly_card = WeekBreakdown(server_data)
+    mvp_winner = guild.get_member(contestants[0][0])
+    server, steam, library = create_guild_cards(mvp_winner, guild.id)
+    view = PageChange(server, steam, library)
+
+    weekly_card = WeekBreakdown(server_data, guild)
+
+    leaderboard = sorted(
+        mvp_data.items(),
+        key = lambda x:x[1]['score'],
+        reverse=True
+    )
+    
+    mvp_breakdown = create_mvp_breakdown_message(leaderboard, user_score_breakdown, guild)
+    s = f"Hey {mvp_winner.mention}! You are this weeks MVP, Great Job!\n" + mvp_breakdown
+
+    msg = await channel.send(content = s, embed = server, view = view)
+    view.message = msg
 
     await channel.send("Here's the weekly breakdown brought to you by yours truly", embed=weekly_card)
+    
 
 
 
-def create_guild_cards(user, interaction):
-    server_stats_card = create_server_profile_card(user, interaction.guild.id)
+def create_guild_cards(user, guild_id):
+    server_stats_card = create_server_profile_card(user, guild_id)
     b_color = server_stats_card.banner_color
     library_stats_card = create_game_library_card(user, b_color)
     steam_card = create_steam_card(user, b_color)
 
-    return server_stats_card, library_stats_card, steam_card
+    return server_stats_card, steam_card, library_stats_card
 
 
 def format_timedelta(td):
@@ -640,8 +957,13 @@ def create_game_library_card(user, b_color):
 
     library = get_user_total_game_library(user.id, cur)
     start_index = 0
+    if library is None:
+        card = GuildCard(user, b_color)
+        card.game_library_card(library,start_index)
+        library_pages.append(card)
+        return library_pages
+    
     max_index = len(library)
-
     # Embeds only allow a max of 25 items so this allows us to display games in batches of 25 per page
     while(start_index < max_index):
         card = GuildCard(user, b_color)
@@ -720,7 +1042,6 @@ def start_game_tracking_process(game, after : discord.Member, activity_type, gui
     #print(f"{after.display_name} has started to play {game} at {self.start_time}")
     
 
-
 def verify_linking_criteria(member_id, steam_id):
     conn,cur = create_connection()
     error_code, existing_profile_name = check_for_existing_steam_link(member_id, cur)
@@ -781,7 +1102,7 @@ async def toggle_sync(interaction: discord.Interaction):
     await interaction.followup.send("Sync happend")
 
 
-@client.tree.command(name = "guildcard", description="print your guild card", guild=GUILD_ID)
+@client.tree.command(name = "guildcard", description="print your guild card")
 async def guildcard(interaction: discord.Interaction, user: discord.Member):
     if user.id == client.user.id:
         await interaction.response.send_message(f"I am part of the guild but I'm just the record keeper.")
@@ -798,7 +1119,7 @@ async def guildcard(interaction: discord.Interaction, user: discord.Member):
     # library_stats_card = create_game_library_card(user, b_color)
     # steam_card = create_steam_card(user, b_color)
 
-    server_stats_card, steam_card, library_stats_card = await asyncio.to_thread(create_guild_cards, user, interaction)
+    server_stats_card, steam_card, library_stats_card = await asyncio.to_thread(create_guild_cards, user, interaction.guild.id)
     view = PageChange(server_stats_card, steam_card, library_stats_card)
 
     await interaction.followup.send(f"Here is {user_name}'s profile", embed = server_stats_card, view = view)
@@ -811,7 +1132,7 @@ async def guildcard(interaction: discord.Interaction, user: discord.Member):
 
 syncing_users = set()
 
-@client.tree.command(name = "link_steam", description = "Links your public steam data to your guild profile.", guild = GUILD_ID)
+@client.tree.command(name = "link_steam", description = "Links your public steam data to your guild profile.")
 async def link_steam_id(interaction : discord.Interaction, steam_id : str):
     if interaction.user.id in syncing_users:
         await interaction.response.send_message("Woah there buddy. It seems like you are already syncing a profile right now. Realx I'll be done soon. I'd like to see you try to sort through dozens of games in seconds hmf")
@@ -865,7 +1186,7 @@ async def link_steam_id(interaction : discord.Interaction, steam_id : str):
         syncing_users.discard(discord_id)
 
 
-@client.tree.command(name = "unlink_steam", description = "removes all data associated with your steam account", guild=GUILD_ID)
+@client.tree.command(name = "unlink_steam", description = "removes all data associated with your steam account")
 async def unlink_steam(interation : discord.Interaction):
     discord_id = interation.user.id
     guild_id = interation.guild.id

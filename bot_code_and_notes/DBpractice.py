@@ -115,7 +115,8 @@ def initialize_db():
         guild_id BIGINT UNIQUE NOT NULL,
         guild_name VARCHAR(255),
         weekly_stats_channel_id BIGINT,
-        news_channel_id BIGINT
+        news_channel_id BIGINT,
+        level_up_channel_id BIGINT
     );
     """)
     logger.info(f"Verified table: guilds")
@@ -129,6 +130,7 @@ def initialize_db():
     """)
     logger.info(f"Verified table: users")
 
+    # add mvps, 2nd, and 3rd places
     cur.execute("""CREATE TABLE IF NOT EXISTS guilds_users (
         id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
         guild_id BIGINT REFERENCES guilds(guild_id),
@@ -141,7 +143,10 @@ def initialize_db():
 
         guild_level INT DEFAULT 1,
         xp INT DEFAULT 0,
-        mvp_mult INT DEFAULT 100
+        mvp_mult INT DEFAULT 100,
+        MVPs INT DEFAULT 0,
+        second_places INT DEFAULT 0,
+        third_places INT DEFAULT 0
     );
     """)
     logger.info(f"Verified table: guilds_users")
@@ -626,12 +631,15 @@ def end_game_tracker(member_id, game_name, activity_type, guild_id, cur : db.ext
     time_played = (today - start_time).total_seconds()
     if time_played < 0:
         time_played = 0
+    if time_played > 43200:
+        time_played = 43200
     # Make sure to add a tracking limit here maybe 12 hours?
     total_time = time_in_game + time_played
 
     update_user_game_time(total_time, uid, gid, cur)
     remove_tracked_game(uid, gid, cur)
-    add_to_server_log(uid, gid, activity_type, guild_id, time_played, start_time, cur)
+    if time_played > 0:
+        add_to_server_log(uid, gid, activity_type, guild_id, time_played, start_time, cur)
     logger.info(f"Successfully ended tracking on {game_name} for user : {member_id} at time : {today}...")
 # also will want to add this data to the server log
 
@@ -811,7 +819,7 @@ def add_member_to_users_database(member, cur : db.extensions.cursor):
         logger.info(f"Verified memeber with username : {user_name}")
 
 
-def verify_member_in_database(total_guilds, bot_profile_id, cur : db.extensions.cursor):
+def verify_members_and_channels_in_database(total_guilds, bot_profile_id, cur : db.extensions.cursor):
     for guild in total_guilds:
         try:
             cur.execute(
@@ -831,16 +839,39 @@ def verify_member_in_database(total_guilds, bot_profile_id, cur : db.extensions.
             else:
                 guild_name = get_guild_name(guild.id, cur)
                 logger.info(f"Verified guild : {guild_name}")
-
         except Exception as e:
             print(f"something went wrong with: {e}")
             logger.info(f"Could not add guild with id {guild.id} ({guild.name})")
+
+        verify_guild_channels(guild, cur)
 
         for member in guild.members:
                 if member.id != bot_profile_id:
                     add_member_to_users_database(member, cur)
                     add_member_to_guilds_users_database(member, guild.id, cur)
 
+def verify_guild_channels(guild, cur : db.extensions.cursor):
+    channel_list = guild.channels
+
+    if channel_list is None or len(channel_list) == 0:
+        logger.error(f"Could not find ANY active channels for guild : {guild.id}")
+        return
+    cur.execute(
+        """SELECT weekly_stats_channel_id, news_channel_id, level_up_channel_id FROM guilds
+            WHERE guild_id = %s
+        """,(guild.id,)
+    )
+    
+    results = cur.fetchone()
+    if results is None:
+        return
+    
+    print(results)
+    default_channel_id = None
+    for channel in channel_list:
+        print(channel)
+
+    
 def game_in_db_from_gid(gid, cur : db.extensions.cursor):
     if gid is None:
         return 0
@@ -1020,8 +1051,6 @@ def add_game_to_database(name, IGDBClient : IGDBClient , cur : db.extensions.cur
     on_steam, steam_game_data = check_steam_game_availability(name)
 
     # There is a chance that a game that doesn't exist could be played so if we don't find a backup image it might be best to abort
-
-
 
     if on_steam == False:
         logger.info(f"{name} was not found on steam. Getting image from igdb")
@@ -1209,7 +1238,7 @@ def link_steam_library(library_data : dict, steam_profile_data : dict, member_id
     # might need to use locks to ensure one sync at a time
     logger.info(library_data)
 
-    
+    # BOOKMARK potentially could make this faster by adding semaphores
     throttle_counter = 0
     for i, game in enumerate(library_data['games']):
         # We might need to check to see if the game is marked as not on steam so we can update it 
@@ -1255,6 +1284,7 @@ def link_steam_library(library_data : dict, steam_profile_data : dict, member_id
                 time_difference = playtime_seconds - old_time_seconds
                 logger.info(f"Adding {time_difference} seconds of playtime for user : {uid} in game : {gid}")
                 # technically this would need to be done for each guild the user is in
+                # BOOKMARK update user stats and give xp
                 add_to_server_log_for_syncing_process(uid, gid, "PLAYING", time_difference, date_buffer, cur)
             
         cur.execute(
@@ -1331,9 +1361,10 @@ def get_user_server_stats(member_id, guild_id, cur : db.extensions.cursor):
     stats = []
 
     uid = get_user_id(member_id, cur)
+
     
     cur.execute(
-        """SELECT total_messages_sent, total_stream_time, total_call_time, guild_level, xp 
+        """SELECT total_messages_sent, total_stream_time, total_call_time, guild_level, xp, mvps, second_places, third_places
             FROM guilds_users
             WHERE guild_id = %s
             AND user_id = %s
@@ -1726,7 +1757,14 @@ def create_mvp_entry(mvp_data, discord_id, uid, guild_id, cur):
     }
 
 
-def get_week_long_server_data(guild_id, cur : db.extensions.cursor):
+def get_week_long_server_data(guild, cur : db.extensions.cursor):
+
+    guild_id = guild.id
+    guild_members = []
+
+    for member in guild.members:
+        guild_members.append(get_user_id(member.id, cur))
+
     server_data = {
         'games' : {},
         'call' : {},
@@ -1742,10 +1780,16 @@ def get_week_long_server_data(guild_id, cur : db.extensions.cursor):
     end_date = dt.datetime.now(timezone.utc) - dt.timedelta(weeks = 1)
     cur.execute(
         """SELECT * FROM server_log
-            WHERE guild_id = %s
-            AND start_time >= %s
+            WHERE start_time >= %s
+            AND(
+                guild_id = %s
+                OR (
+                    activity_type = 'PLAYING'
+                    AND user_id = ANY(%s)
+                )
+            )
             ORDER BY start_time DESC
-        """,(guild_id,end_date)
+        """,(end_date, guild_id, guild_members)
     )
 
     results = cur.fetchall()
@@ -1753,7 +1797,7 @@ def get_week_long_server_data(guild_id, cur : db.extensions.cursor):
     if not results:
         logger.warning(f"Could not find data for guild id : {guild_id}")
         return None
-
+    # BOOKMARK going to have to look at all the games first
     for result in results:
         activity_type = result[4]
 
@@ -1764,9 +1808,11 @@ def get_week_long_server_data(guild_id, cur : db.extensions.cursor):
             game_name = get_game_name_from_id(gid, cur)
             activity_time = result[5]
 
-            server_data['games'].setdefault(game_name, {}).setdefault(discord_id, 0)
+            server_data['games'].setdefault(game_name, {}).setdefault('players', {}).setdefault(discord_id, 0)
+            server_data['games'].setdefault(game_name, {}).setdefault('total_time', 0)
 
-            server_data['games'][game_name][discord_id] += activity_time
+            server_data['games'][game_name]['players'][discord_id] += activity_time
+            server_data['games'][game_name]['total_time'] += activity_time
 
             if discord_id not in mvp_data:
                 create_mvp_entry(mvp_data, discord_id, uid, guild_id, cur)
@@ -1801,17 +1847,14 @@ def get_week_long_server_data(guild_id, cur : db.extensions.cursor):
             
             mvp_data[discord_id]['stream_time'] += activity_time
 
-    
     top_game = None
     top_time = 0
-
     game_list = list(server_data['games'].items())
+
 
     for game_name, game_data in game_list:
         cur_game = game_name
-        cur_time = 0
-        for user in game_data:
-            cur_time += game_data[user]
+        cur_time = game_data['total_time']
 
         if cur_time > top_time:
             top_game = cur_game
@@ -1827,12 +1870,105 @@ def get_week_long_server_data(guild_id, cur : db.extensions.cursor):
 
     print(server_data)
     print('\n')
-    print(mvp_data)
-    print('\n')
 
     return(server_data, mvp_data)
 
+def adjust_mvp_mult(discord_id, guild_id, reset : bool, cur : db.extensions.cursor):
+    uid = get_user_id(discord_id, cur)
+    if uid is None:
+        return
+    
+    if reset:
+        cur.execute(
+            """UPDATE guilds_users
+                SET mvp_mult = 80
+                WHERE user_id = %s
+                AND guild_id = %s
+            """,(uid, guild_id)
+        )
+    else:
+        cur.execute(
+            """UPDATE guilds_users
+                SET mvp_mult = LEAST(mvp_mult + 15, 160)
+                WHERE user_id = %s
+                AND guild_id = %s
+            """,(uid, guild_id)
+        )
 
+def update_user_mvp_data(discord_id, guild_id, placement, cur : db.extensions.cursor):
+    uid = get_user_id(discord_id, cur)
+    if uid is None:
+        return
+    
+    match placement:
+        case 0:
+            column = "mvps"
+            add_user_xp(discord_id, guild_id, 100, cur)
+            adjust_mvp_mult(discord_id, guild_id, True, cur)
+        case 1:
+            column = "second_places"
+            add_user_xp(discord_id, guild_id, 50, cur)
+            adjust_mvp_mult(discord_id, guild_id, False, cur)
+        case 2:
+            column = "third_places"
+            add_user_xp(discord_id, guild_id, 25, cur)
+            adjust_mvp_mult(discord_id, guild_id, False, cur)
+        case _:
+            return
+        
+    cur.execute(
+        f"""
+        UPDATE guilds_users
+        SET {column} = {column} + 1
+        WHERE user_id = %s
+        AND guild_id = %s
+        """,
+        (uid, guild_id)
+    )
+
+def add_user_xp(member_id, guild_id, add_value, cur : db.extensions.cursor):
+    # BOOKMARK going to need to get the user level (xp) before then see if there is a level up then send it back to the client
+
+    uid = get_user_id(member_id, cur)
+    if uid is None:
+        return
+    
+    if guild_id is not None:
+        logger.info(f"Adding {add_value} xp to uid : {uid} in guild : {guild_id}")
+        cur.execute(
+            """UPDATE guilds_users
+                SET xp = xp + %s
+                WHERE user_id = %s
+                AND guild_id = %s
+            """,(add_value, uid, guild_id)
+        )
+    else:
+        logger.info(f"Adding {add_value} xp to uid : {uid} in ALL guilds")
+        cur.execute(
+            """UPDATE guilds_users
+                SET xp = xp + %s
+                WHERE user_id = %s
+            """,(add_value, uid)
+        )
+
+def update_user_message_count(member_id, guild_id, cur : db.extensions.cursor):
+    uid = get_user_id(member_id, cur)
+    if uid is None:
+        return
+
+    if get_total_weekly_messages(uid, guild_id, cur) < 20:
+        add_user_xp(member_id, guild_id, 1, cur)
+
+    cur.execute(
+        """UPDATE guilds_users
+            SET 
+                total_messages_sent = total_messages_sent + 1,
+                messages_sent_this_week = LEAST(messages_sent_this_week + 1, 20)
+            WHERE user_id = %s
+            AND guild_id = %s
+        """,(uid, guild_id)
+    )
+    
 # conn,cur = create_connection()
 # get_week_long_server_data(1534754711536799864, cur)
 # close_connection(conn,cur)       
@@ -1848,6 +1984,7 @@ def add_cost(price):
         """,(price,))
 
     close_connection(conn,cur)
+
 
 def print_db():
     conn,cur = create_connection()

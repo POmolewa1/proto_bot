@@ -7,6 +7,11 @@
 6. Adding profile through steam also needs to handle ID NAMES
 7. Overall need to add a task that syncs users daily checks for news and a weekly task that checks for mvp
 8. Weekly user activity still needs to be implemented 
+9. Stress test everything
+10. If auto sync fails because of profile need to switch autosync off (Display if autosync is on on games profile footer)
+11. when dealing with the daily sync want to add all the linked users to an array so no repeats
+12. for mvp and stuff make sure there is an image url or else don't set it
+13. Have to deal with non values for regular profile
 
 ## On start up
 on_ready()
