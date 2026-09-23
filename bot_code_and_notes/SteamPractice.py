@@ -16,7 +16,6 @@ logger = logging.getLogger(__name__)
 KEY = os.getenv("STEAM_API_KEY")
 
 steam = Steam(KEY)
-
 # user = steam.users.get_user_friends_list("76561198138082742")
 
 # for friend in user["friends"]:
@@ -261,7 +260,46 @@ def look_up_steam_image_and_price(appid : int):
 
     logger.error(f"Could not get Steam data for {appid}")
     return None,None
+
+def enriched_info(appid : int):
+    details = steam.apps.get_app_details(appid)
+    if details is None:
+        for attempt in range(5):
+            logger.warning(f"Could not get app info for appid : {appid} on try : {attempt}")
+            time.sleep(60)
+            print(f"sleep on attempt {attempt}")
+            details = steam.apps.get_app_details(appid)
+            if details is not None:
+                break
+    if details is None:
+        return None, None, None
     
+    for attempt in range(5):
+        try:
+            if details[f'{appid}']['success']:
+                name = details[f'{appid}']['data']['name']
+                image = details[f'{appid}']['data']['header_image']
+            else:
+                name = None
+                image = None     
+
+            details = steam.apps.get_app_details(appid,None, "price_overview")
+            if details is None:
+                return name, image, None
+            if details[f'{appid}']['success'] and len(details[f'{appid}']['data']) != 0:
+                price = details[f'{appid}']['data']['price_overview']['initial']
+            else:
+                price = None
+
+            return name, image, price
+
+        except requests.exceptions.ReadTimeout as e:
+            logger.warning(f"Could not get Steam data for {appid}: {e} on attempt: {attempt}")
+            if attempt < 4:
+                time.sleep(3)
+
+    logger.error(f"Could not get Steam data for {appid}")
+    return None,None, None
 # if __name__ == "__main__":
 #     pass
     #link_steam_library(add_steam_game_library("76561198965639452",None))

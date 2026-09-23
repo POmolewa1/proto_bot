@@ -9,6 +9,8 @@ from SteamPractice import *
 from igdbPractice import *
 from enum import Enum
 from dateutil.relativedelta import relativedelta
+import discord
+import asyncio
 
 class activity_errors(Enum):
     NO_CONFLICT = 0
@@ -96,6 +98,8 @@ logger = logging.getLogger(__name__)
 #conn.close()
 
 def create_connection():
+    conn : db.extensions.connection
+    cur : db.extensions.cursor
     conn = db.connect(host= os.getenv("DB_HOST"), dbname=os.getenv("DB_NAME"), user=os.getenv("USER"), password=os.getenv("PASSWORD"),port=os.getenv("PORT"))
     cur = conn.cursor()
     return conn,cur
@@ -116,7 +120,8 @@ def initialize_db():
         guild_name VARCHAR(255),
         weekly_stats_channel_id BIGINT,
         news_channel_id BIGINT,
-        level_up_channel_id BIGINT
+        level_up_channel_id BIGINT,
+        mvp_role_id BIGINT
     );
     """)
     logger.info(f"Verified table: guilds")
@@ -844,16 +849,49 @@ def verify_members_and_channels_in_database(total_guilds, bot_profile_id, cur : 
             logger.info(f"Could not add guild with id {guild.id} ({guild.name})")
 
         verify_guild_channels(guild, cur)
+        
 
         for member in guild.members:
                 if member.id != bot_profile_id:
                     add_member_to_users_database(member, cur)
                     add_member_to_guilds_users_database(member, guild.id, cur)
 
-def verify_guild_channels(guild, cur : db.extensions.cursor):
+
+db_channel_collumn = {
+    0 : "weekly_stats_channel_id",
+    1 : "news_channel_id",
+    2 : "level_up_channel_id"
+}
+
+def get_channel(channel_type, guild : discord.Guild, cur : db.extensions.cursor):
+    cur.execute(
+        f"""SELECT {db_channel_collumn[channel_type]} FROM guilds
+            WHERE guild_id = %s
+        """,(guild.id,)
+    )
+
+    result = cur.fetchone()
+
+    if result is None:
+        logger.error(f"Guild {guild.id} does not exist")
+        return None
+
+    channel = guild.get_channel(result[0])
+
+    if channel is None:
+        error = verify_guild_channels(guild, cur)
+        if error:
+            return None
+        return get_channel(channel_type, guild, cur)
+
+    return channel
+
+
+def verify_guild_channels(guild : discord.Guild, cur : db.extensions.cursor):
+    
     channel_list = guild.channels
 
-    if channel_list is None or len(channel_list) == 0:
+    if len(channel_list) == 0:
         logger.error(f"Could not find ANY active channels for guild : {guild.id}")
         return
     cur.execute(
@@ -861,16 +899,65 @@ def verify_guild_channels(guild, cur : db.extensions.cursor):
             WHERE guild_id = %s
         """,(guild.id,)
     )
-    
+
     results = cur.fetchone()
     if results is None:
         return
-    
-    print(results)
+    # Check if there are channel ids before this 
+    for i,result in enumerate(results):
+        if result is not None:
+            if guild.get_channel(result) is None:
+                logger.warning(f"Could not find a channel associated with id : {result} because it may have been deleted")
+                cur.execute(
+                    F"""UPDATE guilds
+                        SET {db_channel_collumn[i]} = NULL
+                        WHERE guild_id = %s
+                    """,(guild.id,)
+                )
+                results = list(results)
+                results[i] = None
+                results = tuple(results)
+    #print(results)
     default_channel_id = None
-    for channel in channel_list:
-        print(channel)
+    channel_name = None
+    
+    for i,channel in enumerate(channel_list):
+        if channel.type == discord.ChannelType.text:
+            if default_channel_id is None:
+                default_channel_id = channel.id
+                channel_name = channel.name
 
+            if channel.name == "general":
+                default_channel_id = channel.id
+                channel_name = channel.name
+                break
+
+    if default_channel_id is None:
+        return "error"
+    
+
+    for i in range(3):
+        if results[i] is None:
+            logger.info(f"Setting default channel {db_channel_collumn[i]} for guild : {guild.id} to channel : {default_channel_id}({channel_name})")
+            cur.execute(
+                f"""UPDATE guilds
+                    SET {db_channel_collumn[i]} = %s
+                    WHERE guild_id = %s
+                """,(default_channel_id, guild.id,)
+            )
+
+    logger.info(f"All channels for guild : {guild.id} verified")
+
+
+def update_channel_id(channel_id, channel_collum, guild_id, cur : db.extensions.cursor):
+    cur.execute(
+        f"""UPDATE guilds
+            SET {db_channel_collumn[channel_collum]} = %s
+            WHERE guild_id = %s
+        """,(channel_id, guild_id)
+    )
+
+    logger.info(f"Updated channel {db_channel_collumn[channel_collum]} to {channel_id}")
     
 def game_in_db_from_gid(gid, cur : db.extensions.cursor):
     if gid is None:
@@ -1077,18 +1164,24 @@ def add_game_to_database(name, IGDBClient : IGDBClient , cur : db.extensions.cur
         logger.info(f"{name} is on Steam. Updating from Steam client")
         steam_app_id = steam_game_data['id'][0]
         img, price = look_up_steam_image_and_price(steam_app_id)
+        if img is None:
+            print(
+                f"\n\n\n None for game : {name} \n\n\n"
+            )
         gid = get_game_id_from_name(name, cur)
         if game_in_db_from_gid(gid,cur):
             prev_img = get_game_img(gid,cur)
             if prev_img is not None and img is None:
                 logger.warning(f"Tried to update game: {name} with an image that doesn't exist. Keeping existing image")
                 return
+            #BOOKMARK THETA
         cur.execute(
             """INSERT INTO games (game_name, on_steam, img, steam_app_id, steam_price)
                 VALUES(%s,%s,%s,%s,%s)
-                ON CONFLICT (game_name)
+                ON CONFLICT (steam_app_id)
                 DO UPDATE
                     SET 
+                        game_name = EXCLUDED.game_name,
                         on_steam = EXCLUDED.on_steam,
                         img = EXCLUDED.img,
                         steam_app_id = EXCLUDED.steam_app_id,
@@ -1796,7 +1889,7 @@ def get_week_long_server_data(guild, cur : db.extensions.cursor):
 
     if not results:
         logger.warning(f"Could not find data for guild id : {guild_id}")
-        return None
+        return None, None
     # BOOKMARK going to have to look at all the games first
     for result in results:
         activity_type = result[4]
@@ -1952,6 +2045,7 @@ def add_user_xp(member_id, guild_id, add_value, cur : db.extensions.cursor):
         )
 
 def update_user_message_count(member_id, guild_id, cur : db.extensions.cursor):
+    # BOOKMARK Need to reset weekly messages
     uid = get_user_id(member_id, cur)
     if uid is None:
         return
@@ -1968,10 +2062,150 @@ def update_user_message_count(member_id, guild_id, cur : db.extensions.cursor):
             AND guild_id = %s
         """,(uid, guild_id)
     )
-    
+
+def get_mvp_id(guild_id, cur : db.extensions.cursor):
+    cur.execute(
+        """SELECT mvp_role_id FROM guilds
+            WHERE guild_id = %s
+        """,(guild_id,)
+    )
+
+    result = cur.fetchone()
+    if result is None:
+        logger.error(f"Could not find mvp data for guild : {guild_id}")
+        return "error"
+
+    return result[0]
+
+def update_mvp_role_id(role_id, guild_id, cur : db.extensions.cursor):
+    cur.execute(
+        """UPDATE guilds
+            SET mvp_role_id = %s
+            WHERE guild_id = %s
+        """,(role_id, guild_id)
+    )
+
 # conn,cur = create_connection()
 # get_week_long_server_data(1534754711536799864, cur)
-# close_connection(conn,cur)       
+# close_connection(conn,cur)  
+
+
+def get_all_user_games(on_steam : bool, cur : db.extensions.cursor):
+    if on_steam:
+        cur.execute(
+            """SELECT DISTINCT games.steam_app_id
+                FROM games
+                JOIN user_games
+                    ON games.id = user_games.game_id
+                WHERE games.on_steam = %s
+            """,(on_steam,)
+        )
+    else:
+        cur.execute(
+            """SELECT DISTINCT games.game_name
+                FROM games
+                JOIN user_games
+                    ON games.id = user_games.game_id
+                WHERE games.on_steam = %s
+            """,(on_steam,)
+        )
+    results = cur.fetchall()
+    if not results and on_steam:
+        logger.warning(f"Could not find any Steam games in user_games database")
+    if not results and not on_steam:
+        logger.warning(f"Could not find any NON-Steam games in user_games database")
+    return results
+
+
+def enrich_game_to_database_from_steam(app_id, cur : db.extensions.cursor):
+    on_steam = True
+    appid = app_id
+
+    name, img, price = enriched_info(appid)
+    if name is None:
+        return
+    # If we know the game is on steam but the look up fuction failed to get an image then most likely there was a network issue
+    if game_in_db(appid,cur):
+        logger.info(f"currently enriching game : {name}")
+        print(f"currently enriching game : {name}")
+        gid = get_game_id(appid, cur)
+        prev_img = get_game_img(gid, cur)
+        if prev_img is not None and img is None:
+            logger.warning(f"Tried to update game with Steam id: {app_id} with an image that doesn't exist. Keeping existing image")
+            print(f"Tried to update game with Steam id: {app_id} with an image that doesn't exist. Keeping existing image")
+            return
+    cur.execute(
+        """INSERT INTO games (on_steam, img, steam_app_id, steam_price)
+            VALUES(%s,%s,%s,%s)
+            ON CONFLICT (steam_app_id)
+                DO UPDATE 
+                    SET
+                        on_steam = EXCLUDED.on_steam,
+                        img = EXCLUDED.img,
+                        steam_price = EXCLUDED.steam_price
+        """,(on_steam, img, appid, price)
+    )
+
+
+def game_batch_sync(batch):
+    conn, cur = create_connection()
+    try:
+        for game_id in batch:
+            enrich_game_to_database_from_steam(game_id[0], cur)
+    finally:
+        close_connection(conn, cur)
+
+
+async def enrich_games_database(IGDBclient):
+    conn, cur = create_connection()
+    try:
+        steam_games = get_all_user_games(on_steam = True, cur = cur)
+        non_steam_games = get_all_user_games(on_steam = False, cur = cur)
+    finally:
+        close_connection(conn, cur)
+
+    if steam_games:
+        async def sync_batch(batch, batch_number, max_games):
+            await asyncio.to_thread(game_batch_sync, batch)
+            logger.info(f"Completed games {batch_number}/{max_games}")
+            print(f"Completed games {batch_number}/{max_games}")
+
+        tasks = []
+        for i in range(0, len(steam_games), 30):
+            batch = steam_games[i : i + 30]
+            batch_number = min(len(steam_games), i + 30)
+            tasks.append(asyncio.create_task(sync_batch(batch, batch_number, len(steam_games))))
+
+            if len(tasks) == 3:
+                await asyncio.gather(*tasks)
+                tasks = []
+                if i + 30 < len(steam_games):
+                    logger.info(f"Now resting for 2 minutes")
+                    print("Now resting for 2 minutes")
+                    await asyncio.sleep(120)
+
+        if tasks:
+            await asyncio.gather(*tasks)
+
+    if non_steam_games:
+        await asyncio.to_thread(enrich_games_not_from_steam, non_steam_games, IGDBclient)
+
+    print("Enrichment process completed")
+    logger.info("Enrichment process completed")
+
+def enrich_games_not_from_steam(non_steam_games, IGDBclient):
+    conn, cur = create_connection()
+    try:
+        for game_name in non_steam_games:
+            print(f"Currently enriching game : {game_name}")
+            logger.info(f"Currently enriching game : {game_name}")
+            add_game_to_database(game_name[0], IGDBclient, cur)
+            time.sleep(15)
+    finally:
+        close_connection(conn, cur)
+
+# client = IGDBClient()
+# asyncio.run(enrich_games_database(client))
 
 def add_cost(price):
     conn,cur = create_connection()

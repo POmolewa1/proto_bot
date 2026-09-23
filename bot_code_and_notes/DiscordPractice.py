@@ -234,13 +234,13 @@ class GuildCard(discord.Embed):
             name=" ",
             value=(
                 "```text\n"
-                f"{"🎥 Stream :" :<10} {stream_time :>8}\n\n" 
-                f"{"🔊 Voice :" :<10} {call_time :>8}\n\n" 
-                f"{"🕹️ Gaming :" :<10} {game_time :>8}\n\n"
-                f"{"📨 Messages :" :<10} {messages :>6}\n\n"
+                f"{"🎥 Stream :" :<15} {stream_time :>8}\n\n" 
+                f"{"🔊 Voice :" :<15} {call_time :>8}\n\n" 
+                f"{"🕹️ Gaming :" :<15} {game_time :>8}\n\n"
+                f"{"📨 Messages :" :<15} {messages :>6}\n\n"
                 f"         MVPS\n"
                 "--------------------------\n"
-                f"🏆 : {profile_data[5]} | 🥈: {profile_data[6]} | 🥉: {profile_data[7]}   {"|" :>10}\n"
+                f"🏆 : {profile_data[5]} | 🥈: {profile_data[6]} | 🥉: {profile_data[7]}   {"|" :<10}\n"
                 "```\n"
             )
         )
@@ -529,6 +529,8 @@ class Client(commands.Bot):
         
         initialize_db()
         self.verify_guilds_and_members()
+        for guild in self.guilds:
+            await verify_MVP_role(guild)
 
         try:
             # guild = discord.Object(id = os.getenv("GUILD_ID"))
@@ -542,6 +544,8 @@ class Client(commands.Bot):
 
         if not get_game_news.is_running():
             get_game_news.start()
+        if not weekly_game_library_enrichment.is_running():
+            weekly_game_library_enrichment.start()
 
 
     async def on_message(self, message : discord.Message):
@@ -560,7 +564,8 @@ class Client(commands.Bot):
         update_user_message_count(message.author.id, message.guild.id, cur)
         close_connection(conn,cur)
 
-        await mvp_process(message.guild)
+        if message.content.startswith("m"):
+            await mvp_process(message.guild)
         
         # conn,cur = create_connection()
         # restart_tracked_activities(cur)
@@ -613,15 +618,15 @@ class Client(commands.Bot):
         conn,cur = create_connection()
         total_guilds = self.guilds
         bot_profile_id = self.user.id
-        #d.channels
+        #d.channels c : discord.channel.TextChannel
         
         verify_members_and_channels_in_database(total_guilds, bot_profile_id, cur)
         close_connection(conn,cur)
 
         print("All guilds and members verified")
 
-    async def create_new_member_profile(interaction : discord.Interaction, steam_id : str):
-        pass
+    async def on_member_join(self, member):
+        await asyncio.to_thread(self.verify_guilds_and_members)
 
     async def on_voice_state_update(self, member:discord.Member, before : discord.member.VoiceState, after : discord.member.VoiceState):
         # This will handle streaming time and voice enter time
@@ -664,6 +669,7 @@ class Client(commands.Bot):
         print(f"Just joined {guild.name} id : {guild.id}")
 
         await asyncio.to_thread(self.verify_guilds_and_members)
+        await verify_MVP_role(guild)
         
         
 aaaa = {
@@ -764,6 +770,39 @@ aaaa = {
 
 # Bot command helpers
 #-----------------
+async def create_mvp_role(guild : discord.Guild, cur : db.extensions.cursor, conn : db.extensions.connection):
+    role = await guild.create_role(
+        name = "🏆 MVP 🏆",
+        color= discord.Color.gold(),
+        hoist= True,
+        mentionable = False
+    )
+    update_mvp_role_id(role.id, guild.id, cur)
+    conn.commit()
+    return role.id
+
+async def verify_MVP_role(guild : discord.Guild):
+    conn,cur = create_connection()
+
+    role_id = get_mvp_id(guild.id, cur)
+    if role_id == "error":
+        close_connection(conn, cur)
+        return
+    if role_id is None:
+        logger.warning(f"Could not find an assigned MVP role. Creating MVP role...")
+        role_id = await create_mvp_role(guild, cur, conn)
+
+    role = guild.get_role(role_id)
+    if role is None:
+        logger.warning(f"MVP role might have been deleted. Creating MVP role...")
+        role_id = await create_mvp_role(guild, cur, conn)
+        role = guild.get_role(role_id)
+
+    close_connection(conn,cur)
+
+    return role
+
+
 def calculate_mvp_score(mvp_data):
     user_score_breakdown = {}
 
@@ -776,7 +815,7 @@ def calculate_mvp_score(mvp_data):
 
         mvp_data[user]['score'] = (playtime_score + call_time_score + stream_time_score + messages_score) * score_mult
 
-        user_score_breakdown[user] = f"({playtime_score: .2f} +{call_time_score: .2f} +{stream_time_score: .2f} +{messages_score}) *{score_mult: .2f} = {mvp_data[user]['score']: .2f}"
+        user_score_breakdown[user] = f"({playtime_score: .2f} +{call_time_score: .2f} +{stream_time_score: .2f} + {messages_score}) *{score_mult: .2f} = {mvp_data[user]['score']: .2f}"
 
     print(mvp_data)
     print('\n')
@@ -823,43 +862,63 @@ def create_mvp_breakdown_message(leaderboard, user_score_breakdown, guild : disc
 
     return string
 
+def get_prev_mvp(guild : discord.Guild, role : discord.Role):
+    for member in guild.members:
+       if role in member.roles:
+           return member
 
 async def mvp_process(guild : discord.Guild):
-    channel = guild.get_channel(int(os.getenv("CHANNEL2_ID")))
+    #channel = guild.get_channel(int(os.getenv("CHANNEL2_ID")))
     conn, cur = create_connection()
-    
-    server_data, mvp_data = get_week_long_server_data(guild, cur)
-    
 
-    #user_score_breakdown = bbbb
-    # mvp_data = aaaa
-    if server_data is None:
-        return
-    if len(server_data) == 0:
-        return
-    
-    user_score_breakdown = calculate_mvp_score(mvp_data)
-    
-    #contestants = list(user_score_breakdown.items())
-    contestants = sorted(
-        mvp_data.items(),
-        key = lambda x : x[1]['score'],
-        reverse = True
-    )
+    try:
+        channel = get_channel(0, guild, cur)
+        if channel is None:
+            return
 
-    placements = len(contestants)
-    if placements >= 4:
-        placements = 3
+        #server_data, mvp_data = get_week_long_server_data(guild, cur)
+        server_data, mvp_data = await asyncio.to_thread(get_week_long_server_data, guild, cur)
+        if server_data is None and mvp_data is None:
+            print("No data found")
+            return
 
-    for place in range(placements):
-        if place == 0:
+        #user_score_breakdown = bbbb
+        # mvp_data = aaaa
+        if server_data is None:
+            return
+        if len(server_data) == 0:
+            return
+        
+        user_score_breakdown = calculate_mvp_score(mvp_data)
+        
+        #contestants = list(user_score_breakdown.items())
+        contestants = sorted(
+            mvp_data.items(),
+            key = lambda x : x[1]['score'],
+            reverse = True
+        )
+
+        placements = len(contestants)
+        if placements >= 4:
+            placements = 3
+
+        
+        mvp_role = await verify_MVP_role(guild)
+        last_mvp = get_prev_mvp(guild, mvp_role)
+        if last_mvp is not None:
+            await last_mvp.remove_roles(mvp_role)
+
+        mvp_winner = guild.get_member(contestants[0][0])
+        await mvp_winner.add_roles(mvp_role)
+
+        for place in range(placements): 
             update_user_mvp_data(contestants[place][0], guild.id, place, cur)
-        else:
-            update_user_mvp_data(contestants[place][0], guild.id, place, cur)
-            
-    close_connection(conn, cur)
-    mvp_winner = guild.get_member(contestants[0][0])
-    server, steam, library = create_guild_cards(mvp_winner, guild.id)
+    finally:
+        close_connection(conn, cur)
+
+    
+    # server, steam, library = create_guild_cards(mvp_winner, guild.id)
+    server, steam, library = await asyncio.to_thread(create_guild_cards, mvp_winner, guild.id)
     view = PageChange(server, steam, library)
 
     weekly_card = WeekBreakdown(server_data, guild)
@@ -870,7 +929,8 @@ async def mvp_process(guild : discord.Guild):
         reverse=True
     )
     
-    mvp_breakdown = create_mvp_breakdown_message(leaderboard, user_score_breakdown, guild)
+    #mvp_breakdown = create_mvp_breakdown_message(leaderboard, user_score_breakdown, guild)
+    mvp_breakdown = await asyncio.to_thread(create_mvp_breakdown_message, leaderboard, user_score_breakdown, guild)
     s = f"Hey {mvp_winner.mention}! You are this weeks MVP, Great Job!\n" + mvp_breakdown
 
     msg = await channel.send(content = s, embed = server, view = view)
@@ -878,8 +938,6 @@ async def mvp_process(guild : discord.Guild):
 
     await channel.send("Here's the weekly breakdown brought to you by yours truly", embed=weekly_card)
     
-
-
 
 def create_guild_cards(user, guild_id):
     server_stats_card = create_server_profile_card(user, guild_id)
@@ -1096,6 +1154,7 @@ async def printer(interaction: discord.Interaction, printer: str):
 
 @client.tree.command(name = "toggle_steam_sync", description= "Turns on/off whether your steam account will be updated at the end of the day", guild= GUILD_ID)
 async def toggle_sync(interaction: discord.Interaction):
+    # BOOKMARK display whether linking is active for user also need to untoggle sync when autosync fails
     await interaction.response.defer()
     member_id = interaction.user.id
     syncing_process(member_id)
@@ -1202,6 +1261,40 @@ async def unlink_steam(interation : discord.Interaction):
     og_message = await interation.original_response()
     await og_message.edit(content=f"Account succesfully unlinked for {member.display_name}")
 
+channel_name = {
+    0 : "MVP",
+    1 : "News",
+    2 : "Level Up"
+}
+@client.tree.command(name = "set_channel_type", description = "Enter a number (0 - 2). [0 : MVP Channel, 1 : Game News, 2 : Level Up Channel]")
+async def set_channel_type(interaction : discord.Interaction, channel_type : int):
+    
+    if not interaction.user.guild_permissions.manage_channels:
+        await interaction.response.send_message(
+            content = """Hmm, it looks like you don't have the permissions to manage channels.Please contact the server owner or a mod who has this permisson""",
+            ephemeral=True
+        )
+        return
+    
+    if not isinstance(channel_type, int) or channel_type > 2 or channel_type < 0:
+        await interaction.response.send_message(
+            content= 
+            """Please select a number 0 - 2 to set this to the oppropriate channel.\n
+            0 : MVP Channel\n
+            1 : Game News\n
+            2 : Level Up Channel"""
+        )
+        return
+    
+    await interaction.response.defer()
+
+    conn,cur = create_connection()
+    update_channel_id(interaction.channel_id, channel_type, interaction.guild_id, cur)
+    close_connection(conn, cur)
+
+    await interaction.followup.send(content= f"Channel type is now type : {channel_name[channel_type]}")
+
+
 # set announcment command
 # 1. look at the channel and guild that the user set the command
 # 2. store the channel id in the guilds database
@@ -1212,7 +1305,7 @@ async def unlink_steam(interation : discord.Interaction):
 
 @tasks.loop(
         time = [
-            dt.time(hour = 9, minute = 44, tzinfo=ZoneInfo("America/Los_Angeles")), 
+            dt.time(hour = 9, minute = 0, tzinfo=ZoneInfo("America/Los_Angeles")), 
             dt.time(hour = 21, minute = 0, tzinfo=ZoneInfo("America/Los_Angeles"))
         ]
 )
@@ -1234,6 +1327,15 @@ async def get_game_news():
                     message = create_response(article_url, game_data['relavent_members'])
                     await channel.send(message)
 
+@tasks.loop(
+    time = [
+        dt.time(hour = 20, minute = 20, tzinfo=ZoneInfo("America/Los_Angeles"))
+    ]
+)
+async def weekly_game_library_enrichment():
+    logger.info("Starting library enrichment")
+    print("Starting library enrichment")
+    await enrich_games_database(igdbclient)
     
 # profile stats = [total_messages_sent, total_stream_time, total_call_time, guild_level, xp, server_playtime]
 # Steam stats = [account_name, creation_time, steam_games_count, account_cost, total_steam_time, last_sync]
