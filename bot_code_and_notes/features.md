@@ -1,17 +1,12 @@
 ## Still to do
 1. guild card needs formatting and the banner color needs to be adjusted
-2. XP system still needs to be implementd
-3. MVP system needs to be implemented along with the mvp cards
 4. News still needs to be properly adjusted along with the time it searches for games and not sending duplicate news the same day (refreshes daily)
-5. Thoughts on adding a game filter that won't add games to user_profile and then maybe a /filterupdate that only I can use 
 6. Adding profile through steam also needs to handle ID NAMES
-7. Overall need to add a task that syncs users daily checks for news and a weekly task that checks for mvp
-8. Weekly user activity still needs to be implemented 
+7. Need to do daily reset
+8. Weekly reset will reset weekly messages
+
 9. Stress test everything
-10. If auto sync fails because of profile need to switch autosync off (Display if autosync is on on games profile footer)
-11. when dealing with the daily sync want to add all the linked users to an array so no repeats
-12. for mvp and stuff make sure there is an image url or else don't set it
-13. Have to deal with non values for regular profile
+
 
 ## On start up
 on_ready()
@@ -53,13 +48,8 @@ on_presence_update()
 1. Sync is automatically set at first then if the profile goes to private or the user unsyncs then it is turned off
 2. When the hours for a game changes update recently played if not already. Maybe if the time checked is within 6 or so hours of the recently played
 
-## Game recommendation feature
 
-1. Checks all the people in the voice call to see what games everyone has
-2. There could be a recommend all command that just says what games everyone has 
-3. Maybe I could update the price of each game in the library once a day to see if there is a sale
-
-## Calendar for past activity monitoring 
+## Calendar for past activity monitoring (This is now a 2 week server log)
 could have an internal calendar
 
 | 1 | 2 | 3 | 4 | 5 | 6 | 7 |

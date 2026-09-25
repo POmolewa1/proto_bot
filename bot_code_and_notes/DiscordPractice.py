@@ -620,9 +620,14 @@ class Client(commands.Bot):
             #await message.channel.send(f"Hi there {message.author.display_name}", embeds = [self.e,self.e,self.e,self.e])
             #await message.channel.send(f"Hi there {message.author.display_avatar.url}")
             # print(message.author.guild.id)
+
+        level = get_user_level(message.author.id, message.guild.id)
         conn,cur = create_connection()
         update_user_message_count(message.author.id, message.guild.id, cur)
         close_connection(conn,cur)
+        new_level = get_user_level(message.author.id, message.guild.id)
+        if level != new_level:
+            await level_up_message(level, new_level, message.author.id, message.guild)
 
         if message.content.startswith("m"):
             await mvp_process(message.guild)
@@ -1220,6 +1225,9 @@ def syncing_process(member_id):
         # 2 is private so we turn off the auto sync and return
         if error_code == 2:
             # swap auto sync to false
+            auto_sync_toggle_set(member_id, False)
+            print(f"Set member : {member_id} auto sync to False")
+            logger.warning(f"Set member : {member_id} auto sync to False because their profile is offline")
             return
         if error_code == 0:
             game_library = get_steam_game_library(steam_id)
@@ -1273,7 +1281,7 @@ async def level_up_message(prev_level, new_level, user_id, guild : discord.Guild
     await asyncio.to_thread(update_user_level, new_level, guild.id, user_id)
 
     await level_up_channel.send(
-        content= f"Congrats {user.mention} leveled up from {prev_level} {RANK_TITLES[prev_level]}-> {new_level} {RANK_TITLES[new_level]}",
+        content= f"Congrats {user.mention} leveled up from {prev_level} {RANK_TITLES[get_user_rank_title(prev_level)]}-> {new_level} {RANK_TITLES[get_user_rank_title(new_level)]}",
         embed= server, 
         view = view
     )
@@ -1358,7 +1366,7 @@ async def link_steam_id(interaction : discord.Interaction, steam_id : str):
                 await interaction.followup.send(f"Hmm, I couldn't find a Steam profile with that ID. Could you double-check that you entered the correct numbers and try again?")
                 return
             case 2:
-                await interaction.followup.send(f"I found your Steam profile, but it looks like it's set to private. Could you go into your Steam profile settings and make sure it's set to public? Once you've done that, try again!")
+                await interaction.followup.send(f"I found your Steam profile, but it looks like it's set to private. Your profile (specifically your game library) will need to be set to public for me to see it.")
                 return
             case 3:
                 await interaction.followup.send(f"Mmm, I just checked and it looks like you already have a Steam profile linked ({user_profile}).\n\nIf you'd like to link a different Steam profile, just use /unlink_steam_data first, then come back and use this command again!")

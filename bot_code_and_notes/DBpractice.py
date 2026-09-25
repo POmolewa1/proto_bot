@@ -366,6 +366,7 @@ def add_to_todays_news_database(news_title, gid, cur : db.extensions.cursor):
         """,(news_title, gid)
     )
 
+#BOOKMARK THETA just add guild as well
 def get_filtered_news_gids(cur : db.extensions.cursor):
     news_filter = []
     cur.execute(
@@ -2525,7 +2526,7 @@ def auto_sync_toggle_set(member_id, value):
                 toggle = True
             
         cur.execute(
-            """UPDATE general_steam_data (auto_sync_steam)
+            """UPDATE general_steam_data
                 SET auto_sync_steam = %s
             """,(toggle,)
         )

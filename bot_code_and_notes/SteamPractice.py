@@ -147,10 +147,13 @@ title = 930210
 # print(news)
 
 def get_game_news_from_steam(appid_user_dictionary, news_filter):
+
     to_be_added_to_filter = []
     logger.info("Started looking for relevent news from Steam client")
     today = dt.datetime.now(timezone.utc)
+    #BOOKMARK THETA
     date_cutoff = today - dt.timedelta(days=14)
+
     for appid in appid_user_dictionary:
         try:
             url = f"https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/?appid={appid}&maxlength=150&count=5"
