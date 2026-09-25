@@ -27,6 +27,65 @@ intents.presences = True
 lock = asyncio.Lock()
 igdbclient = IGDBClient()
 
+LEVEL_THRESHOLDS = [
+    0, # lv. 1
+    8000, # lv. 2
+    17000, # lv. 3
+
+    27000, # lv. 4
+    38000, # lv. 5
+    50000, # lv. 6
+
+    63000, # lv. 7
+    77000, # lv. 8
+    92000, # lv. 9
+
+    108000, # lv. 10
+    125000, # lv. 11
+    143000, # lv. 12
+
+    162000, # lv. 13
+    182000, # lv. 14
+    203000, # lv. 15
+
+    225000, # lv. 16
+    248000, # lv. 17
+    272000, # lv. 18
+
+    297000, # lv. 19
+    323000, # lv. 20
+    350000  # lv. 21
+]
+
+RANK_TITLES = {
+    1 : "Recruit",
+    2 : "Rank 2-er",
+    3 : "Rank 3-er",
+    4 : "Rank 4-er",
+    5 : "Rank 5-er",
+    6 : "Rank 6-er",
+    7 : "Rank 7-er",
+}
+
+banner_color = {
+            1 : discord.Color.from_str("#444443"),
+            2 : discord.Color.from_str("#CD7801"),
+            3 : discord.Color.from_str("#FF0000"),
+            4 : discord.Color.from_str("#C9C902"),
+            5 : discord.Color.from_str("#00FF08"),
+            6 : discord.Color.from_str("#3300FF"),
+            7 : discord.Color.from_str("#CE00C0")
+        }
+
+activity_key = {
+            0 : "⬛",
+            1 : "🟨",
+            2 : "🟩",
+            3 : "🟦",
+            4 : "🟪"
+        }
+
+
 class PageChange(discord.ui.View):
     def __init__(self, page1, page2, page3):
         super().__init__(timeout = 60)
@@ -145,23 +204,6 @@ class ConfirmDeny(discord.ui.View):
         await interaction.response.edit_message(content="Got it. If the profile isn't the one you expected try searching by id name",embed=None,view=None) 
         self.stop()
 
-banner_color = {
-            1 : discord.Color.from_str("#444443"),
-            2 : discord.Color.from_str("#CD7801"),
-            3 : discord.Color.from_str("#FF0000"),
-            4 : discord.Color.from_str("#C9C902"),
-            5 : discord.Color.from_str("#00FF08"),
-            6 : discord.Color.from_str("#3300FF"),
-            7 : discord.Color.from_str("#CE00C0")
-        }
-
-activity_key = {
-            0 : "⬛",
-            1 : "🟨",
-            2 : "🟩",
-            3 : "🟦",
-            4 : "🟪"
-        }
 
 class GuildCard(discord.Embed):
     def __init__(self, user, banner_color = None):
@@ -170,18 +212,27 @@ class GuildCard(discord.Embed):
         self.user_name = user.display_name
         self.banner_color = banner_color
 
-    def server_stats_card(self, activity_data, recent_game_name, recent_game_image_url, profile_data):
+    # Profile Data = [total_messages_sent, total_stream_time, total_call_time, guild_level, xp, mvps, second_places, third_places, server_playtime]
+    def server_stats_card(self, activity_data, recent_game_name, recent_game_image_url, profile_data, member_id, guild_id):
         
-
         self.title = f"{self.user_name}"
         self.set_thumbnail(url = self.profile_picture)
-        self.banner_color = banner_color[profile_data[3]]
-        self.color = self.banner_color
 
-        self.description = (
-            f"### Level {profile_data[3]} - Rookie \n"
-            f"### XP : {profile_data[4]} / {profile_data[3] * 100}\n\n"
-        )
+        level = get_user_level(member_id, guild_id)
+        rank = get_user_rank_title(level)
+        self.banner_color = banner_color[level]
+        self.color = self.banner_color
+        
+        if level < 21:
+            self.description = (
+                f"### Level {level} - {RANK_TITLES[rank]} \n"
+                f"### XP : {int((profile_data[4] - LEVEL_THRESHOLDS[level - 1]) / 100)} / {int(LEVEL_THRESHOLDS[level] / 100)}\n\n"
+            )
+        else:
+            self.description = (
+                f"### Level {level} - {RANK_TITLES[rank]} \n"
+                f"### XP : MAX\n\n"
+            )
 
         self.add_field(name = "📅 - Weekly Activity", value= "-" * 52, inline=False)
         self.add_field(
@@ -229,7 +280,7 @@ class GuildCard(discord.Embed):
         # self.add_field(name = "🔊 Playtime", value = call_time, inline=True)
         # self.add_field(name = "📨 Messages Sent", value = f"{messages}", inline=True)
         # self.add_field(name="Most Recent Game", value="", inline=False)
-        self.add_field(name=f"📊 - General Server Stats", value= "-" * 52, inline=False)
+        self.add_field(name=f"📊 - General Stats", value= "-" * 52, inline=False)
         self.add_field(
             name=" ",
             value=(
@@ -254,7 +305,7 @@ class GuildCard(discord.Embed):
         # self.add_field(name="Recently Played Game", value="Terraria")
 
     def steam_stats_card(self, steam_data):
-        # [account_name, creation_time, steam_games_count, account_cost, total_steam_time, last_sync, profile_pic, most_played_game_dict]
+        # [account_name, creation_time, steam_games_count, account_cost, total_steam_time, last_sync, profile_pic, auto_sync_steam, most_played_game_dict]
         self.title = "Steam Stats"
         self.color = self.banner_color
 
@@ -282,13 +333,19 @@ class GuildCard(discord.Embed):
 
         total_steam_time = format_timedelta(dt.timedelta(seconds = steam_data[4]))
         last_sync = steam_data[5].date()
+        auto_sync_value = steam_data[7]
+        if auto_sync_value is not None:
+            if auto_sync_value == True:
+                auto_sync_value = "ON"
+            else:
+                auto_sync_value = "OFF"
 
         game_name = ""
-        if len(steam_data[7]) == 0:
+        if len(steam_data[8]) == 0:
             game_name = "N/A"
             playtime = "N/A"
         else:
-            most_played_game = list(steam_data[7].items())
+            most_played_game = list(steam_data[8].items())
             game_name, game_data = most_played_game[0]
             playtime = format_timedelta(dt.timedelta(seconds = game_data['playtime']))
         
@@ -311,7 +368,7 @@ class GuildCard(discord.Embed):
 
         self.add_field(name=f"Most Played Game", value= f"({game_name} - {playtime})", inline=False)
 
-        self.set_footer(text= f"\n\nLast synced {last_sync}")
+        self.set_footer(text= f"\n\nLast synced {last_sync}            Auto-Sync: {auto_sync_value}")
     
 
     def game_library_card(self, game_library, start_index):
@@ -521,6 +578,7 @@ class SampleDiscordProfile(discord.Embed):
         self.url = profile_details['player']['profileurl']
         self.set_image(url=profile_details['player']['avatarfull'])
 
+processing_user = set()
 
 class Client(commands.Bot):
     #e = Embedding("https://cdn.discordapp.com/avatars/385277889404207105/fb8b1cae3be44ba623caee0610343864.png?size=1024")
@@ -546,6 +604,8 @@ class Client(commands.Bot):
             get_game_news.start()
         if not weekly_game_library_enrichment.is_running():
             weekly_game_library_enrichment.start()
+        if not end_of_day_processes.is_running():
+            end_of_day_processes.start()
 
 
     async def on_message(self, message : discord.Message):
@@ -573,6 +633,7 @@ class Client(commands.Bot):
 
 
     async def on_reaction_add(self, reaction, user):
+        return
         await reaction.message.channel.send("You reacted")
 
     
@@ -586,10 +647,30 @@ class Client(commands.Bot):
         if before.activity != None:
             if before.activity.type == discord.ActivityType.playing:
                 game = before.activity.name
+                # get a dictionary of guild_id : user_level
+                member_id = before.id
+                if member_id in processing_user or member_id == self.user.id:
+                    return
+                
+                try:
+                    processing_user.add(member_id)
+                    snapshot, guild_table = get_level_snapshot(member_id, self.guilds)
+                    #print(f"IN : {snapshot}")
 
-                await asyncio.to_thread(end_game_tracking_process, before.id, game, "PLAYING", before.guild.id)
-                end_time = dt.datetime.now(timezone.utc)
-                print(f"{before.display_name} has stopped playing {game} at {end_time}")
+                    await asyncio.to_thread(end_game_tracking_process, before.id, game, "PLAYING", before.guild.id)
+
+                    new_snapshot, _ = get_level_snapshot(member_id, self.guilds)
+                    #print(f"OUT : {new_snapshot}")
+                    for guild_id in new_snapshot:
+                        if new_snapshot[guild_id] != snapshot[guild_id]:
+                            print(f"User went from level {snapshot[guild_id]} to level {new_snapshot[guild_id]} in server {guild_id}")
+                            #await level_up_message(snapshot[guild_id], new_snapshot[guild_id], member_id, guild_table[guild_id])
+                            asyncio.create_task(level_up_message(snapshot[guild_id], new_snapshot[guild_id], member_id, guild_table[guild_id]))
+                    # get a new dictionary of guild_id : user_level if the levels are different from the old one send the level up message
+                    end_time = dt.datetime.now(timezone.utc)
+                    print(f"{before.display_name} has stopped playing {game} at {end_time}")
+                finally:
+                    processing_user.discard(member_id)
                 #print(f"played for {(end_time - start_time).total_seconds()} seconds")
 
         # At 12 or whenever make sure to calculate the time for all currently active games then add them to the players/guild. Then change the time to that current time. Maybe doesn't matter for weekly
@@ -770,6 +851,16 @@ aaaa = {
 
 # Bot command helpers
 #-----------------
+def get_level_snapshot(member_id, guilds):
+    users_guilds_and_levels = {}
+    guild_table = {}
+    for guild in guilds:
+        for member in guild.members:
+            if member.id == member_id:
+                users_guilds_and_levels[guild.id] = get_user_level(member_id, guild.id)
+                guild_table[guild.id] = guild
+    return users_guilds_and_levels, guild_table
+
 async def create_mvp_role(guild : discord.Guild, cur : db.extensions.cursor, conn : db.extensions.connection):
     role = await guild.create_role(
         name = "🏆 MVP 🏆",
@@ -888,7 +979,7 @@ async def mvp_process(guild : discord.Guild):
             return
         if len(server_data) == 0:
             return
-        
+        #BOOKMARK we can get the users total messages from here
         user_score_breakdown = calculate_mvp_score(mvp_data)
         
         #contestants = list(user_score_breakdown.items())
@@ -929,7 +1020,6 @@ async def mvp_process(guild : discord.Guild):
         reverse=True
     )
     
-    #mvp_breakdown = create_mvp_breakdown_message(leaderboard, user_score_breakdown, guild)
     mvp_breakdown = await asyncio.to_thread(create_mvp_breakdown_message, leaderboard, user_score_breakdown, guild)
     s = f"Hey {mvp_winner.mention}! You are this weeks MVP, Great Job!\n" + mvp_breakdown
 
@@ -1002,7 +1092,7 @@ def create_server_profile_card(user, guild_id):
     pdata = get_user_server_stats(user.id, guild_id, cur)
     activity_data = get_user_activity(user.id, cur)
     card = GuildCard(user)
-    card.server_stats_card(activity_data, game_name, game_pic, pdata)
+    card.server_stats_card(activity_data, game_name, game_pic, pdata, user.id, guild_id)
     close_connection(conn,cur)
 
     return card
@@ -1042,7 +1132,6 @@ def create_steam_card(user, b_color):
     steam_card.steam_stats_card(steam_stats)
 
     return steam_card
-    # come back here
 
 
 def create_response(url, user_list):
@@ -1083,11 +1172,20 @@ def end_game_tracking_process(member_id, game_name, activity_type, guild_id):
 def start_game_tracking_process(game, after : discord.Member, activity_type, guild_id):
     conn,cur = create_connection()
     # Immediatly update the game and user profiles with the new data if data not found
+    
     if activity_type == "PLAYING":
+
         if not game_name_in_database(game, cur):
             add_game_to_database(game, igdbclient, cur)
             add_game_to_user_profile(game, after.id, cur)
             conn.commit()
+
+        game_filter = get_filterd_games(cur)
+        gid = get_game_id_from_name(game, cur)
+        if gid in game_filter:
+            logger.info(f"Game : {game} was found in the filter and was not added to member {after.id} profile")
+            return
+        
         if not user_owns_game(after.id, game, cur):
             add_game_to_user_profile(game, after.id, cur)
             conn.commit()
@@ -1113,20 +1211,21 @@ def verify_linking_criteria(member_id, steam_id):
 
 def syncing_process(member_id):
     conn,cur = create_connection()
-    steam_id = get_user_steam_id(member_id, cur)
-    if steam_id is None:
-        logger.warning(f"Aborting syncing process for member : {member_id} because no steam id was found")
-        return
-    error_code, user_profile = verify_steam_access(steam_id)
-    # 2 is private so we turn off the auto sync and return
-    if error_code == 2:
-        # swap auto sync to false
-        return
-    if error_code == 0:
-        game_library = get_steam_game_library(steam_id)
-        link_steam_library(game_library, user_profile, member_id, cur, conn, True)
-
-    close_connection(conn,cur)
+    try:
+        steam_id = get_user_steam_id(member_id, cur)
+        if steam_id is None:
+            logger.warning(f"Aborting syncing process for member : {member_id} because no steam id was found")
+            return
+        error_code, user_profile = verify_steam_access(steam_id)
+        # 2 is private so we turn off the auto sync and return
+        if error_code == 2:
+            # swap auto sync to false
+            return
+        if error_code == 0:
+            game_library = get_steam_game_library(steam_id)
+            link_steam_library(game_library, user_profile, member_id, cur, conn, True)
+    finally:
+        close_connection(conn,cur)
 
 
 def linking_process(user_profile, interaction):
@@ -1135,6 +1234,49 @@ def linking_process(user_profile, interaction):
     game_library = get_steam_game_library(user_profile['player']['steamid'])
     link_steam_library(game_library, user_profile, interaction.user.id, cur, conn)
     close_connection(conn,cur)
+
+def get_user_rank_title(user_level):
+    rank = (user_level - 1) // 3 + 1
+
+    if rank >= 7:
+        return 7
+    
+    return rank
+
+def get_user_level(member_id, guild_id):
+    xp = get_user_xp(member_id, guild_id)
+
+    level = 0
+    for milestone in LEVEL_THRESHOLDS:
+        if xp >= milestone:
+            level += 1
+        else:
+            break
+
+    return level
+
+
+async def level_up_message(prev_level, new_level, user_id, guild : discord.Guild):
+    conn,cur = create_connection()
+    level_up_channel = get_channel(2, guild, cur)
+    close_connection(conn,cur)
+    if level_up_channel is None:
+        logger.error(f"Could not send a message in a channel that doesn't exist")
+        return
+
+    user = guild.get_member(user_id)
+    server, steam, library = create_guild_cards(user, guild.id)
+    view = PageChange(server, steam, library)
+
+    user_name = user.display_name
+
+    await asyncio.to_thread(update_user_level, new_level, guild.id, user_id)
+
+    await level_up_channel.send(
+        content= f"Congrats {user.mention} leveled up from {prev_level} {RANK_TITLES[prev_level]}-> {new_level} {RANK_TITLES[new_level]}",
+        embed= server, 
+        view = view
+    )
 
 
 
@@ -1152,13 +1294,27 @@ async def say_hello(interaction: discord.Interaction):
 async def printer(interaction: discord.Interaction, printer: str):
     await interaction.response.send_message(printer)
 
+@client.tree.command(name = "game_filter", description = "**Dev command only** Allows games to be filterd in user_games", guild= GUILD_ID)
+async def filter_game(interaction : discord.Interaction, game_name : str):
+
+    if interaction.user.id != int(os.getenv("DEV_ID")):
+        await interaction.response.send_message("Sorry, only my Boss has access to that command. If you need a game removed from your profile just let him know", ephemeral= True)
+        return
+    
+    await interaction.response.defer(ephemeral=True)
+
+    response = await asyncio.to_thread(update_game_filter, game_name)    
+
+    await interaction.followup.send(content= response, ephemeral=True)
+
+
 @client.tree.command(name = "toggle_steam_sync", description= "Turns on/off whether your steam account will be updated at the end of the day", guild= GUILD_ID)
 async def toggle_sync(interaction: discord.Interaction):
     # BOOKMARK display whether linking is active for user also need to untoggle sync when autosync fails
-    await interaction.response.defer()
+    await interaction.response.defer(ephemeral=True)
     member_id = interaction.user.id
-    syncing_process(member_id)
-    await interaction.followup.send("Sync happend")
+    sync_value = auto_sync_toggle_set(member_id, None)
+    await interaction.followup.send(content= f"Your Steam profile now has auto sync set to -> {sync_value}", ephemeral=True)
 
 
 @client.tree.command(name = "guildcard", description="print your guild card")
@@ -1169,25 +1325,13 @@ async def guildcard(interaction: discord.Interaction, user: discord.Member):
     await interaction.response.defer()
 
     user_name = user.display_name
-    #picture = Embedding(user.display_avatar.url)
-    #picture = Embedding("https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/2369900/header.jpg?t=1745815495")
-    #picture = Embedding("http://images.igdb.com/igdb/image/upload/t_thumb/co904o.jpg")
-
-    # server_stats_card = create_server_profile_card(user, interaction.guild.id)
-    # b_color = server_stats_card.banner_color
-    # library_stats_card = create_game_library_card(user, b_color)
-    # steam_card = create_steam_card(user, b_color)
 
     server_stats_card, steam_card, library_stats_card = await asyncio.to_thread(create_guild_cards, user, interaction.guild.id)
     view = PageChange(server_stats_card, steam_card, library_stats_card)
 
     await interaction.followup.send(f"Here is {user_name}'s profile", embed = server_stats_card, view = view)
     view.message = await interaction.original_response()
-    #await interaction.followup.send(print_db())
 
-     # if user_name != interaction.user.display_name:
-        #     await interaction.response.send_message(f"That is not your profile")
-        # else:
 
 syncing_users = set()
 
@@ -1295,10 +1439,6 @@ async def set_channel_type(interaction : discord.Interaction, channel_type : int
     await interaction.followup.send(content= f"Channel type is now type : {channel_name[channel_type]}")
 
 
-# set announcment command
-# 1. look at the channel and guild that the user set the command
-# 2. store the channel id in the guilds database
-# 3. The guild database could have collumns for |guild_id|game_news|weekly_stats|
 
 # Task loop commands
 #----------------------
@@ -1306,12 +1446,15 @@ async def set_channel_type(interaction : discord.Interaction, channel_type : int
 @tasks.loop(
         time = [
             dt.time(hour = 9, minute = 0, tzinfo=ZoneInfo("America/Los_Angeles")), 
-            dt.time(hour = 21, minute = 0, tzinfo=ZoneInfo("America/Los_Angeles"))
+            dt.time(hour = 20, minute = 57, tzinfo=ZoneInfo("America/Los_Angeles"))
         ]
 )
 async def get_game_news():
     # going to need to get a list off appids from everyones most recently played games that month
     # need to look at all the users who have that game and have played within a month and maybe @ them in the messages
+    logger.info("Started news search process...")
+    print("Started news search process...")
+
     for guild in client.guilds:
         member_list = []
         for member in guild.members:
@@ -1319,26 +1462,87 @@ async def get_game_news():
                 member_list.append(member.id)
         # when we store the cannels for a guild find it first here instead
         news_dictionary = await asyncio.to_thread(process_member_games_into_news, member_list)
-        channel = guild.get_channel(int(os.getenv("CHANNEL2_ID")))
+        #channel = guild.get_channel(int(os.getenv("CHANNEL2_ID")))
+
+        conn,cur = create_connection()
+        channel = get_channel(1, guild, cur)
+        close_connection(conn,cur)
+        if channel is None:
+            logger.error(f"Could not find a channel in guild : {guild.id}")
+            return
 
         for game_id, game_data in news_dictionary.items():
             if len(game_data['news_articles']) != 0:
                 for article_url in game_data['news_articles']:
                     message = create_response(article_url, game_data['relavent_members'])
                     await channel.send(message)
+    logger.info("news search finished")
+    print("news search finished")
+
 
 @tasks.loop(
     time = [
-        dt.time(hour = 20, minute = 20, tzinfo=ZoneInfo("America/Los_Angeles"))
+        dt.time(hour = 17, minute = 3, tzinfo=ZoneInfo("America/Los_Angeles"))
     ]
 )
 async def weekly_game_library_enrichment():
-    logger.info("Starting library enrichment")
-    print("Starting library enrichment")
-    await enrich_games_database(igdbclient)
     
-# profile stats = [total_messages_sent, total_stream_time, total_call_time, guild_level, xp, server_playtime]
-# Steam stats = [account_name, creation_time, steam_games_count, account_cost, total_steam_time, last_sync]
-# Game_library dictionary   game_name : {server_time : x, steam_time : x}
+    if dt.datetime.now(timezone.utc).weekday() == 3:
+        logger.info("Starting library enrichment")
+        print("Starting library enrichment")
+        await enrich_games_database(igdbclient)
+
+SYNC_WORKERS = 5
+syncing_process_sem = asyncio.Semaphore(SYNC_WORKERS)
+
+async def syncing_process_task(member_id, guilds):
+    async with syncing_process_sem:
+        logger.info(f"Started syncing process for member : {member_id} with guilds : {guilds}")
+        print(f"Started syncing process for member : {member_id}")
+
+        snapshot, guild_table = get_level_snapshot(member_id, guilds)
+        # put syncing process on a differnt thread
+        await asyncio.to_thread(syncing_process, member_id)
+        new_snapshot, _ = get_level_snapshot(member_id, guilds)
+        for guild_id in new_snapshot:
+            if new_snapshot[guild_id] != snapshot[guild_id]:
+                print(f"User went from level {snapshot[guild_id]} to level {new_snapshot[guild_id]} in server {guild_id}")
+                asyncio.create_task(level_up_message(snapshot[guild_id], new_snapshot[guild_id], member_id, guild_table[guild_id]))
+
+# @tasks.loop(
+#     time = [
+#         dt.time(hour =11, minute = 58, tzinfo = ZoneInfo("America/Los_Angeles"))
+#     ]
+# )
+@tasks.loop(
+    time = [
+        dt.time(hour =18, minute = 14, tzinfo = ZoneInfo("America/Los_Angeles"))
+    ]
+)
+async def end_of_day_processes():
+    #BOOKMARK need to also refresh things like weekly messages, clear 2 week old server_log, clear 2 day old news filter
+    #await asyncio.to_thread(restart_tracked_activities)
+    #await asyncio.sleep(120)
+
+    logger.info("Began syncing process for users' steam library")
+    print("Began syncing process for users' steam library")
+
+    checked_members = set()
+    tasks = []
+    for guild in client.guilds:
+        for member in guild.members:
+            if member.id in checked_members or member.id == client.user.id:
+                continue
+            checked_members.add(member.id)
+
+            auto_sync_enabled = get_auto_sync_value(member.id)
+            
+            if auto_sync_enabled == True:
+                tasks.append(asyncio.create_task(syncing_process_task(member.id, client.guilds)))
+            
+    if tasks:
+        await asyncio.gather(*tasks)
+
 
 client.run(os.getenv("DISCORD_TOKEN"), log_handler=handler, log_level=logging.DEBUG)
+

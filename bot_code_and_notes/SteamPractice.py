@@ -3,7 +3,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 from steam_web_api import Steam
-#from DBpractice import *
+
+# from DBpractice import create_connection
+# from DBpractice import close_connection
+# from DBpractice import add_to_todays_news_database
+# from DBpractice import *
+
 import datetime as dt
 from datetime import timezone
 from dateutil.relativedelta import relativedelta
@@ -135,32 +140,50 @@ title = 930210
 # now = now.astimezone(pacific).time().hour
 # print(now)
 
-def get_game_news_from_steam(appid_user_dictionary):
-    # need to return a dictionary of games to news like| Helldivers 2(id= 33333) : news(dictionary) |
+# url = f"https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/?appid=281990&maxlength=150&count=5"
+# request = requests.get(url, timeout= 20)
+# request.raise_for_status()
+# news = request.json()
+# print(news)
+
+def get_game_news_from_steam(appid_user_dictionary, news_filter):
+    to_be_added_to_filter = []
     logger.info("Started looking for relevent news from Steam client")
     today = dt.datetime.now(timezone.utc)
-    date_cutoff = today - dt.timedelta(days=10)
+    date_cutoff = today - dt.timedelta(days=14)
     for appid in appid_user_dictionary:
-        url = f"https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/?appid={appid}&maxlength=150&count=5"
-        request = requests.get(url, timeout= 20)
-        news = request.json()
-        if news is None:
-            logger.info(f"No news found for appid : {appid}")
+        try:
+            url = f"https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/?appid={appid}&maxlength=150&count=5"
+            request = requests.get(url, timeout= 20)
+            request.raise_for_status()
+            news = request.json()
+
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"Could not get news for appid {appid}: {e}")
             continue
 
-        for artice in news['appnews']['newsitems']:
-            article_timestamp = artice['date']
+        if not news.get("appnews", {}).get("newsitems"):
+            logger.info(f"No news found for appid: {appid}")
+            continue
+
+        for article in news['appnews']['newsitems']:
+            article_timestamp = article['date']
+            article_title = article['title']
             article_date = dt.datetime.fromtimestamp(article_timestamp, timezone.utc)
-            feed_type = artice['feed_type']
+            feed_type = article['feed_type']
+            article_gid = int(article['gid'])
             if article_date <= date_cutoff:
                 break
-            # also have to check if it has not already been mentioned within the last 24 hours
-            if feed_type == 1:
-                appid_user_dictionary[appid]['news_articles'].append(artice['url'])
+            
+            if feed_type == 1 and article_gid not in news_filter:
+                appid_user_dictionary[appid]['news_articles'].append(article['url'])
+                news_filter.append(article_gid)
+
+                to_be_added_to_filter.append((article_title, article_gid))
 
     logger.info(f"All relevant news has been recorded : {appid_user_dictionary}")
     # print(appid_user_dictionary)
-    return appid_user_dictionary
+    return appid_user_dictionary, to_be_added_to_filter
 
 
 #get_game_news(1)
@@ -304,3 +327,6 @@ def enriched_info(appid : int):
 #     pass
     #link_steam_library(add_steam_game_library("76561198965639452",None))
     #print(add_steam_game_library("76561198965639452",None,None))
+
+# games = get_recently_played_games(76561198138082742)
+# print(games)
