@@ -48,9 +48,11 @@ title = 930210
 # print(game)
 
 # user_games = steam.users.get_user_details("76561198868092917")
-#user_games = steam.users.search_user("GethUprising")
+# user_games = steam.users.search_user("GethUprising")
 # user_games = steam.users.get_owned_games("76561198868092917")
 # print(user_games)
+# if user_games == "No match":
+#     print("None")
 
 # try:
 #     user_games = steam.apps.get_user_achievements("76561198658552885","3224770")
@@ -151,8 +153,8 @@ def get_game_news_from_steam(appid_user_dictionary, news_filter):
     to_be_added_to_filter = []
     logger.info("Started looking for relevent news from Steam client")
     today = dt.datetime.now(timezone.utc)
-    #BOOKMARK THETA
-    date_cutoff = today - dt.timedelta(days=14)
+
+    date_cutoff = today - dt.timedelta(days=1)
 
     for appid in appid_user_dictionary:
         try:
@@ -229,9 +231,17 @@ def search_for_user(name):
 
     return 0, user
 
-
+def search_steam_user_with_custom_id(custom_id : str):
+    user = steam.users.search_user(custom_id)
+    if user == "No match":
+        return None
+    else:
+        return user
+    
 def verify_steam_access(steam_id : str):
-    user = steam.users.get_user_details(steam_id)
+    user = search_steam_user_with_custom_id(steam_id)
+    if user is None:
+        user = steam.users.get_user_details(steam_id)
     # The user was not found
     if user['player'] == None:
         return 1, None
@@ -248,6 +258,7 @@ def get_steam_game_library(steam_id : str):
     steam_library = steam.users.get_owned_games(steam_id)
     return steam_library
 
+# details = steam.apps.get_app_details(1230)
 
 def look_up_steam_image_and_price(appid : int):
     details = steam.apps.get_app_details(appid)
@@ -259,21 +270,31 @@ def look_up_steam_image_and_price(appid : int):
             details = steam.apps.get_app_details(appid)
             if details is not None:
                 break
-    if details is None:
+    if details is None or len(details) == 0:
         return None, None
     
     for attempt in range(5):
         try:
-            if details[f'{appid}']['success']:
-                image = details[f'{appid}']['data']['header_image']
+
+            response_key = next(iter(details))
+
+            if details[response_key]['success']:
+                image = details[response_key]['data']['header_image']
             else:
                 image = None
 
-            details = steam.apps.get_app_details(appid,None, "price_overview")
-            if details is None:
+            details = steam.apps.get_app_details(appid, None, "price_overview")
+            if details is None or len(details) == 0:
                 return image, None
-            if details[f'{appid}']['success'] and len(details[f'{appid}']['data']) != 0:
-                price = details[f'{appid}']['data']['price_overview']['initial']
+            
+            response_key = next(iter(details))
+            if details[response_key]['success']:
+                price_overview = details[response_key]['data'].get('price_overview')
+
+                if price_overview is not None:
+                    price = price_overview.get('initial')
+                else:
+                    price = None
             else:
                 price = None
 

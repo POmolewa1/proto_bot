@@ -69,9 +69,9 @@ RANK_TITLES = {
 
 banner_color = {
             1 : discord.Color.from_str("#444443"),
-            2 : discord.Color.from_str("#CD7801"),
-            3 : discord.Color.from_str("#FF0000"),
-            4 : discord.Color.from_str("#C9C902"),
+            2 : discord.Color.from_str("#AF6600"),
+            3 : discord.Color.from_str("#CF0303"),
+            4 : discord.Color.from_str("#E0AE09"),
             5 : discord.Color.from_str("#00FF08"),
             6 : discord.Color.from_str("#3300FF"),
             7 : discord.Color.from_str("#CE00C0")
@@ -178,14 +178,14 @@ class ConfirmDeny(discord.ui.View):
 
     async def on_timeout(self):
         message = await self.first_interaction.original_response()
-        await message.edit(content=f"{self.first_interaction.user.mention} I do have other things to attend to, you know. Honestly, must you make my job more difficult than it needs to be? Try again when you're ready, but next time, do try not to keep me waiting.",embed=None,view=None)
+        await message.edit(content=f"{self.first_interaction.user.mention} Honestly, I do have other things to attend to, you know. I can't exactly stand here waiting for you all day. Try again when you're ready, and this time, do try to keep up with me. I have a schedule to maintain, after all.", embed=None, view=None)
         self.stop()
 
     @discord.ui.button(label = "Confirm", style=discord.ButtonStyle.green)
     async def confirm(self, interaction : discord.Interaction, button):
         current_user = interaction.user.id
         if current_user != self.discord_user:
-            await interaction.response.send_message(content="Sorry I'm pretty sure this isn't your command. Only the person who sent the command can interact with it", ephemeral=True)
+            await interaction.response.send_message(content="Sorry this isn't your command. Only the person who sent the command can interact with it", ephemeral=True)
             return
         self.confirmed = True
 
@@ -198,7 +198,7 @@ class ConfirmDeny(discord.ui.View):
     async def deny(self, interaction : discord.Interaction, button):
         current_user = interaction.user.id
         if current_user != self.discord_user:
-            await interaction.response.send_message("Sorry I'm pretty sure this isn't your command. Only the person who sent the command can interact with it", ephemeral=True)
+            await interaction.response.send_message("Sorry this isn't your command. Only the person who sent the command can interact with it", ephemeral=True)
             return
 
         await interaction.response.edit_message(content="Got it. If the profile isn't the one you expected try searching by id name",embed=None,view=None) 
@@ -220,7 +220,7 @@ class GuildCard(discord.Embed):
 
         level = get_user_level(member_id, guild_id)
         rank = get_user_rank_title(level)
-        self.banner_color = banner_color[level]
+        self.banner_color = banner_color[rank]
         self.color = self.banner_color
         
         if level < 21:
@@ -291,7 +291,7 @@ class GuildCard(discord.Embed):
                 f"{"📨 Messages :" :<15} {messages :>6}\n\n"
                 f"         MVPS\n"
                 "--------------------------\n"
-                f"🏆 : {profile_data[5]} | 🥈: {profile_data[6]} | 🥉: {profile_data[7]}   {"|" :<10}\n"
+                f"🏆 : {profile_data[5]} | 🥈: {profile_data[6]} | 🥉: {profile_data[7]}         \n"
                 "```\n"
             )
         )
@@ -314,7 +314,7 @@ class GuildCard(discord.Embed):
             self.description = (
                 f"### Steam Profile"
             )
-            self.add_field(name=f"Steam Profile Not Linked", value= "If you would like to link steam please do so", inline=False)
+            self.add_field(name=f"Steam Profile Not Linked", value= "If you would like to link enter /link_steam (your discord_id) in chat.", inline=False)
             return
 
         self.set_thumbnail(url = steam_data[6])
@@ -359,7 +359,7 @@ class GuildCard(discord.Embed):
                 f"---------------------------------\n"
                 f"📚 Games in Library   ---  {steam_games_count}\n\n"
                 f"---------------------------------\n"
-                f"💵 Aprox. Libray value\n        ${account_cost}\n\n" 
+                f"💵 Aprox. Libray value\n        ${account_cost /100}\n\n" 
                 f"---------------------------------\n"
                 f"👾 Total Game Time   ---  {total_steam_time}\n\n"
                 "```\n"
@@ -421,11 +421,21 @@ class Embedding(discord.Embed):
         self.add_field(name="Favorite Game", value="Terraria")
 
 class WeekBreakdown(discord.Embed):
-    def __init__(self, server_data, guild):
+    def __init__(self, server_data, message_leaderboard, guild):
         super().__init__()
 
         self.title = "Weekly Breakdown"
         self.description = " "
+        self.color = discord.Color.from_str("#FBFBFB")
+        self.add_field(
+            name=(
+                "\n"
+                "Messages - 💬\n"
+                "-------------------------------------\n"
+            ), 
+            value = create_string_from_list_for_messages(message_leaderboard, guild),
+            inline=False
+        )
 
         stream_data = sorted(
             server_data['stream'].items(),
@@ -435,7 +445,7 @@ class WeekBreakdown(discord.Embed):
         self.add_field(
             name=(
                 "\n"
-                "Time Streamed\n"
+                "Time Streamed - 📺\n"
                 "-------------------------------------\n"
             ), 
             value = create_string_from_list(stream_data, guild),
@@ -451,7 +461,7 @@ class WeekBreakdown(discord.Embed):
         self.add_field(
             name=(
                 "\n"
-                "Time In Call\n"
+                "Time In Call - 📞\n"
                 "-------------------------------------\n"
             ), 
             value = create_string_from_list(call_data, guild),
@@ -461,7 +471,7 @@ class WeekBreakdown(discord.Embed):
         self.add_field(
             name=(
                 "\n"
-                "Games Played This Week\n"
+                "Games Played This Week - 🎮\n"
                 "-------------------------------------\n"
             ), 
             value = "",
@@ -510,6 +520,30 @@ class WeekBreakdown(discord.Embed):
         else:
             self.add_field(name="Most Popular Game", value=f"N/A - N/A", inline=False)
 
+
+def create_string_from_list_for_messages(item_list, guild):
+    if len(item_list) == 0:
+        return " "
+    string = (
+        "```text\n"
+        f"{'Name' : <20} | {'Messages' : >6}\n"
+        "---------------------------------\n"
+    )
+
+    total_messages = 0
+    for user, data in item_list:
+        discord_name = guild.get_member(user).display_name
+        messages = data
+        total_messages += messages
+        
+        string += f"{discord_name:<20} | {messages:>6}\n"
+        
+    string += (
+        f"\n{'total:' : <22} {total_messages : >6}\n"
+        "```"
+    )
+
+    return string
 
 def create_string_from_list(item_list, guild):
     if len(item_list) == 0:
@@ -578,8 +612,18 @@ class SampleDiscordProfile(discord.Embed):
         self.url = profile_details['player']['profileurl']
         self.set_image(url=profile_details['player']['avatarfull'])
 
-processing_user = set()
 
+processing_user = set()
+def get_guild_intro():
+    with open("messages/guild_intro.txt", "r", encoding="utf-8") as file:
+        return file.read()
+def get_help_message():
+    with open("messages/help.txt", "r", encoding="utf-8") as file:
+        return file.read()
+def get_help_message2():
+    with open("messages/help2.txt", "r", encoding="utf-8") as file:
+        return file.read()
+    
 class Client(commands.Bot):
     #e = Embedding("https://cdn.discordapp.com/avatars/385277889404207105/fb8b1cae3be44ba623caee0610343864.png?size=1024")
     async def on_ready(self):
@@ -596,6 +640,14 @@ class Client(commands.Bot):
             # print(f"Synced {len(synced)} commands to guild {guild.id}")
             synced = await self.tree.sync()
             print(f"Synced {len(synced)} commands to all guilds")
+
+            guild = self.get_guild(int(os.getenv("GUILD_ID")))
+
+            if guild is not None:
+                guild_synced = await self.tree.sync(guild=guild)
+                print(f"Synced {len(guild_synced)} guild commands to {guild.id}")
+            else:
+                print(f"Bot is not in guild {GUILD_ID}, skipping guild command sync")
             
         except Exception as e:
             print(f"Error syncing commands: {e}")
@@ -606,6 +658,8 @@ class Client(commands.Bot):
             weekly_game_library_enrichment.start()
         if not end_of_day_processes.is_running():
             end_of_day_processes.start()
+        if not holiday_message.is_running():
+            holiday_message.start()
 
 
     async def on_message(self, message : discord.Message):
@@ -629,8 +683,17 @@ class Client(commands.Bot):
         if level != new_level:
             await level_up_message(level, new_level, message.author.id, message.guild)
 
-        if message.content.startswith("m"):
-            await mvp_process(message.guild)
+        # For testing
+        # if message.content.startswith("m"):
+        #     await mvp_process(message.guild)
+
+        # if message.content.startswith("h"):
+        #     channel = self.get_channel(1552002381439443114)
+        #     if channel is None:
+        #         return
+        #     h_message = create_holiday_message()
+        #     await channel.send(content=h_message, allowed_mentions=discord.AllowedMentions(everyone=True))
+            
         
         # conn,cur = create_connection()
         # restart_tracked_activities(cur)
@@ -904,7 +967,7 @@ def calculate_mvp_score(mvp_data):
 
     for user in mvp_data:
         playtime_score = (mvp_data[user]['playtime'] / 900) * 2
-        call_time_score = (mvp_data[user]['call_time'] / 900) * 4
+        call_time_score = (mvp_data[user]['call_time'] / 900) * 3
         stream_time_score = (mvp_data[user]['stream_time'] / 900) * 6
         messages_score = min(mvp_data[user]['messages'], 20) 
         score_mult = mvp_data[user]['mvp_mult'] / 100
@@ -928,17 +991,7 @@ def create_mvp_breakdown_message(leaderboard, user_score_breakdown, guild : disc
             "────────────────────────────────────────\n\n"
         )
 
-    # for i, (user, _) in enumerate(leaderboard):
-    #     match i:
-    #         case 0:
-    #             string += f"🥇 {guild.get_member(user).display_name : <20} {user_score_breakdown[user]}\n"
-    #         case 1:
-    #             string += f"🥈 {guild.get_member(user).display_name : <20} {user_score_breakdown[user]}\n"
-    #         case 2:
-    #             string += f"🥉 {guild.get_member(user).display_name : <20} {user_score_breakdown[user]}\n"
-    #         case _:
-    #             string += f"{i + 1}. {guild.get_member(user).display_name : <20} {user_score_breakdown[user]}\n"
-
+   
     for i, (user, _) in enumerate(leaderboard):
         match i:
             case 0:
@@ -949,10 +1002,6 @@ def create_mvp_breakdown_message(leaderboard, user_score_breakdown, guild : disc
                 string += f"{"🥉":<3} {guild.get_member(user).display_name : <20}\n{user_score_breakdown[user]}\n\n"
             case _:
                 string += f"{i + 1}.   {guild.get_member(user).display_name : <20}\n{user_score_breakdown[user]}\n\n"
-
-    string += (
-        f"Congrats {guild.get_member(leaderboard[0][0]).display_name} on being this weeks mvp"
-    )
 
     string += "```"
 
@@ -984,7 +1033,7 @@ async def mvp_process(guild : discord.Guild):
             return
         if len(server_data) == 0:
             return
-        #BOOKMARK we can get the users total messages from here
+        
         user_score_breakdown = calculate_mvp_score(mvp_data)
         
         #contestants = list(user_score_breakdown.items())
@@ -1012,12 +1061,22 @@ async def mvp_process(guild : discord.Guild):
     finally:
         close_connection(conn, cur)
 
-    
+    mvp_data_sorted_by_messages = sorted(
+        mvp_data.items(),
+        key = lambda x:x[1]['messages'],
+        reverse=True
+    )
+    message_leaderboard = []
+    for user, data in mvp_data_sorted_by_messages:
+        messages = data['messages']
+        if messages > 0:
+            message_leaderboard.append((user, messages))
+
     # server, steam, library = create_guild_cards(mvp_winner, guild.id)
     server, steam, library = await asyncio.to_thread(create_guild_cards, mvp_winner, guild.id)
     view = PageChange(server, steam, library)
 
-    weekly_card = WeekBreakdown(server_data, guild)
+    weekly_card = WeekBreakdown(server_data, message_leaderboard, guild)
 
     leaderboard = sorted(
         mvp_data.items(),
@@ -1026,13 +1085,57 @@ async def mvp_process(guild : discord.Guild):
     )
     
     mvp_breakdown = await asyncio.to_thread(create_mvp_breakdown_message, leaderboard, user_score_breakdown, guild)
-    s = f"Hey {mvp_winner.mention}! You are this weeks MVP, Great Job!\n" + mvp_breakdown
+    praise = create_mvp_praise(mvp_winner)
+    s = f"{praise}\n" + mvp_breakdown
 
     msg = await channel.send(content = s, embed = server, view = view)
     view.message = msg
 
-    await channel.send("Here's the weekly breakdown brought to you by yours truly", embed=weekly_card)
-    
+    await channel.send("Here's this week's breakdown. I've already gone through everything, so you can simply review the results. Naturally. 📋", embed=weekly_card)
+
+def create_mvp_praise(user : discord.Member):
+    variant = random.randint(1,6)
+    string = ""
+    match variant:
+        case 1:
+            string = (
+                f"Hey {user.mention}! Congratulations! You are this week's MVP! 🏆 \n"
+                "You've certainly earned it. Naturally, I made sure your achievement was properly recognized."
+            )
+        case 2:
+            string = (
+                f"Hey {user.mention}! Congratulations on being this weeks MVP! 🏆 \n" 
+                "I suppose your performance was worthy of recognition after all. "
+                "Are you sure you don't have a Crest as well? 😊"
+            )
+        case 3:
+            string = (
+                f"Hey {user.mention}! Congratulations! You are this week's MVP! 🏆 \n"
+                "If you'd performed like that at the Officers' Academy, I wouldn't be surprised if our professor took notice of you."
+            )
+        case 4:
+            string = (
+                f"Hey {user.mention}! You did quite well this week! 🏆 "
+                "I suppose all that hard work finally paid off. Don't get too comfortable, though. There's always next week!"
+            )
+        case 5:
+            string = (
+                f"Hey {user.mention}! Congratulations! You are this week's MVP! 🏆 \n"
+                "Good job! 🏆 You've certainly earned this one. Just don't let the title go to your head. "
+                "Even Claude would tell you there's always room to improve. 😌"
+            )
+        case 6:
+            string = (
+                f"Hey {user.mention}! Impressive performance this week 🏆 \n"
+                "Much better than Hilda, that's for sure. "
+                "The only things she's good at are putting on makeup and getting the knights to do her work. 🙄"
+            )
+        case 6:
+            string = (
+                f"Hey {user.mention}! You did well this week 🏆 \n"
+                "As Claude would probably say, it's not luck—it's fate"
+            )
+    return string
 
 def create_guild_cards(user, guild_id):
     server_stats_card = create_server_profile_card(user, guild_id)
@@ -1147,25 +1250,68 @@ def create_response(url, user_list):
     for user in user_list:
         member = client.get_user(user)
         if len(user_list) > 2 and count != (len(user_list) - 1):
-            members += f"{member.display_name}, "
+            members += f"{member.mention}, "
             count += 1
         elif len(user_list) >= 2 and count == (len(user_list) - 1):
-            members += f"and {member.display_name}"
+            members += f"and {member.mention}"
             count += 1
         else:
-            members += f"{member.display_name} "
+            members += f"{member.mention} "
             count += 1
+    
+    if len(user_list) > 1:
 
-    match variant:
-        case 1:
-            message = f"Hey {members}.\n I found some news that you might like to see \n {url}"
-            return message
-        case 2:
-            message = f"Hey {members}.\n Check out this news \n {url}"
-            return message
-        case 3:
-            message = f"Hey {members} \n I saw you guys playing this game recently and thought you might like to see this \n {url}"
-            return message
+        match variant:
+            case 1:
+                message = (
+                    f"Hey {members}.\n"
+                    f"I found some news about a game you've been playing. "
+                    f"I thought you might be interested.\n\n"
+                    f"{url}"
+                )
+                return message
+            case 2:
+                message = (
+                    f"Hey {members}.\n"
+                    f"You might want to take a look at this. "
+                    f"I figured it was worth bringing to your attention.\n\n"
+                    f"{url}"
+                )
+                return message
+            case 3:
+                message = (
+                    f"Hey {members}.\n"
+                    f"I noticed you guys have been playing this game recently, "
+                    f"so I thought you might like to see this.\n\n"
+                    f"{url}"
+                )
+                return message
+    else:
+        match variant:
+            case 1:
+                message = (
+                    f"Hey {members}.\n"
+                    f"I found some news about a game you've played recently. "
+                    f"I thought you might find this interesting.\n\n"
+                    f"{url}"
+                )
+                return message
+            case 2:
+                message = (
+                    f"Hey {members}.\n"
+                    f"I saw you playing this game recently, so naturally I thought "
+                    f"you might be interested in this.\n\n"
+                    f"{url}"
+                )
+                return message
+            case 3:
+                message = (
+                    f"Hey {members}.\n"
+                    f"You've been playing this recently, haven't you? "
+                    f"I thought this might be worth a look.\n\n"
+                    f"{url}"
+                )
+                return message
         
 
 def end_game_tracking_process(member_id, game_name, activity_type, guild_id):
@@ -1286,6 +1432,22 @@ async def level_up_message(prev_level, new_level, user_id, guild : discord.Guild
         view = view
     )
 
+SYNC_WORKERS = 5
+syncing_process_sem = asyncio.Semaphore(SYNC_WORKERS)
+
+async def syncing_process_task(member_id, guilds):
+    async with syncing_process_sem:
+        logger.info(f"Started syncing process for member : {member_id} with guilds : {guilds}")
+        print(f"Started syncing process for member : {member_id}")
+
+        snapshot, guild_table = get_level_snapshot(member_id, guilds)
+        # put syncing process on a differnt thread
+        await asyncio.to_thread(syncing_process, member_id)
+        new_snapshot, _ = get_level_snapshot(member_id, guilds)
+        for guild_id in new_snapshot:
+            if new_snapshot[guild_id] != snapshot[guild_id]:
+                print(f"User went from level {snapshot[guild_id]} to level {new_snapshot[guild_id]} in server {guild_id}")
+                asyncio.create_task(level_up_message(snapshot[guild_id], new_snapshot[guild_id], member_id, guild_table[guild_id]))
 
 
 # Bot /commands
@@ -1315,10 +1477,17 @@ async def filter_game(interaction : discord.Interaction, game_name : str):
 
     await interaction.followup.send(content= response, ephemeral=True)
 
-
-@client.tree.command(name = "toggle_steam_sync", description= "Turns on/off whether your steam account will be updated at the end of the day", guild= GUILD_ID)
+@client.tree.command(name = "help", description= "get more info on commands")
 async def toggle_sync(interaction: discord.Interaction):
-    # BOOKMARK display whether linking is active for user also need to untoggle sync when autosync fails
+    message = get_help_message()
+    await interaction.response.send_message(message, ephemeral=True)
+    message = get_help_message2()
+    await interaction.followup.send(content=message, ephemeral=True)
+
+
+@client.tree.command(name = "toggle_steam_sync", description= "Turns on/off whether your steam account will be updated at the end of the day")
+async def toggle_sync(interaction: discord.Interaction):
+    
     await interaction.response.defer(ephemeral=True)
     member_id = interaction.user.id
     sync_value = auto_sync_toggle_set(member_id, None)
@@ -1339,14 +1508,18 @@ async def guildcard(interaction: discord.Interaction, user: discord.Member):
 
     await interaction.followup.send(f"Here is {user_name}'s profile", embed = server_stats_card, view = view)
     view.message = await interaction.original_response()
-
+    
 
 syncing_users = set()
 
 @client.tree.command(name = "link_steam", description = "Links your public steam data to your guild profile.")
 async def link_steam_id(interaction : discord.Interaction, steam_id : str):
+    if steam_id == str(os.getenv("DEV_DISCORD")) and interaction.user.id != int(os.getenv("DEV_ID")):
+        await interaction.response.send_message("Hey, sorry! It looks like you've entered my boss's Discord ID. You don't have to link an account that belongs to you specifically, but this one is reserved for him. I'm afraid you'll have to use someone else's.", ephemeral=True)
+        return
+
     if interaction.user.id in syncing_users:
-        await interaction.response.send_message("Woah there buddy. It seems like you are already syncing a profile right now. Realx I'll be done soon. I'd like to see you try to sort through dozens of games in seconds hmf")
+        await interaction.response.send_message("Woah there buddy. It seems like you are already syncing a profile right now. Realx I'll be done soon. I'd like to see you try to sort through dozens of games in seconds hmf", ephemeral=True)
         return
     discord_id = interaction.user.id
     syncing_users.add(discord_id)
@@ -1454,12 +1627,10 @@ async def set_channel_type(interaction : discord.Interaction, channel_type : int
 @tasks.loop(
         time = [
             dt.time(hour = 9, minute = 0, tzinfo=ZoneInfo("America/Los_Angeles")), 
-            dt.time(hour = 20, minute = 57, tzinfo=ZoneInfo("America/Los_Angeles"))
+            dt.time(hour = 21, minute = 0, tzinfo=ZoneInfo("America/Los_Angeles"))
         ]
 )
 async def get_game_news():
-    # going to need to get a list off appids from everyones most recently played games that month
-    # need to look at all the users who have that game and have played within a month and maybe @ them in the messages
     logger.info("Started news search process...")
     print("Started news search process...")
 
@@ -1468,16 +1639,15 @@ async def get_game_news():
         for member in guild.members:
             if member.id != client.user.id:
                 member_list.append(member.id)
-        # when we store the cannels for a guild find it first here instead
-        news_dictionary = await asyncio.to_thread(process_member_games_into_news, member_list)
-        #channel = guild.get_channel(int(os.getenv("CHANNEL2_ID")))
+    
+        news_dictionary = await asyncio.to_thread(process_member_games_into_news, member_list, guild.id)
 
         conn,cur = create_connection()
         channel = get_channel(1, guild, cur)
         close_connection(conn,cur)
         if channel is None:
             logger.error(f"Could not find a channel in guild : {guild.id}")
-            return
+            continue
 
         for game_id, game_data in news_dictionary.items():
             if len(game_data['news_articles']) != 0:
@@ -1490,47 +1660,28 @@ async def get_game_news():
 
 @tasks.loop(
     time = [
-        dt.time(hour = 17, minute = 3, tzinfo=ZoneInfo("America/Los_Angeles"))
+        dt.time(hour = 7, minute = 0, tzinfo=ZoneInfo("America/Los_Angeles"))
     ]
 )
 async def weekly_game_library_enrichment():
     
-    if dt.datetime.now(timezone.utc).weekday() == 3:
+    if dt.datetime.now(ZoneInfo("America/Los_Angeles")).weekday() == 2:
         logger.info("Starting library enrichment")
         print("Starting library enrichment")
         await enrich_games_database(igdbclient)
 
-SYNC_WORKERS = 5
-syncing_process_sem = asyncio.Semaphore(SYNC_WORKERS)
 
-async def syncing_process_task(member_id, guilds):
-    async with syncing_process_sem:
-        logger.info(f"Started syncing process for member : {member_id} with guilds : {guilds}")
-        print(f"Started syncing process for member : {member_id}")
 
-        snapshot, guild_table = get_level_snapshot(member_id, guilds)
-        # put syncing process on a differnt thread
-        await asyncio.to_thread(syncing_process, member_id)
-        new_snapshot, _ = get_level_snapshot(member_id, guilds)
-        for guild_id in new_snapshot:
-            if new_snapshot[guild_id] != snapshot[guild_id]:
-                print(f"User went from level {snapshot[guild_id]} to level {new_snapshot[guild_id]} in server {guild_id}")
-                asyncio.create_task(level_up_message(snapshot[guild_id], new_snapshot[guild_id], member_id, guild_table[guild_id]))
-
-# @tasks.loop(
-#     time = [
-#         dt.time(hour =11, minute = 58, tzinfo = ZoneInfo("America/Los_Angeles"))
-#     ]
-# )
 @tasks.loop(
     time = [
-        dt.time(hour =18, minute = 14, tzinfo = ZoneInfo("America/Los_Angeles"))
+        dt.time(hour = 23, minute = 58, tzinfo = ZoneInfo("America/Los_Angeles"))
     ]
 )
 async def end_of_day_processes():
-    #BOOKMARK need to also refresh things like weekly messages, clear 2 week old server_log, clear 2 day old news filter
-    #await asyncio.to_thread(restart_tracked_activities)
-    #await asyncio.sleep(120)
+    await asyncio.to_thread(restart_tracked_activities)
+    logger.info("Resting for 2 minutes")
+    print("Resting for 2 minutes")
+    await asyncio.sleep(120)
 
     logger.info("Began syncing process for users' steam library")
     print("Began syncing process for users' steam library")
@@ -1550,6 +1701,196 @@ async def end_of_day_processes():
             
     if tasks:
         await asyncio.gather(*tasks)
+
+
+    await asyncio.to_thread(daily_cleanup)
+
+    if dt.datetime.now(ZoneInfo("America/Los_Angeles")).weekday() == 5:
+        for guild in client.guilds:
+
+            logger.info(f"Starting mvp process for guild : {guild.id}")
+            print(f"Starting mvp process for guild : {guild.id}")
+
+            await mvp_process(guild)
+
+        await asyncio.to_thread(weekly_cleanup)
+
+HOLIDAYS = {
+    (1, 1): "New Year's Day",
+    (2, 14): "Valentine's Day",
+    (7, 4): "Independence Day",
+    (10, 31): "Halloween",
+    (12, 25): "Christmas"
+}
+def get_thanksgiving(year):
+    november_first = dt.date(year, 11, 1)
+    days_until_thursday = (3 - november_first.weekday()) % 7
+    first_thursday = november_first + dt.timedelta(days=days_until_thursday)
+    return first_thursday + dt.timedelta(weeks=3)
+@tasks.loop(
+    time = [
+        dt.time(hour =7, minute = 0, tzinfo = ZoneInfo("America/Los_Angeles"))
+    ]
+)
+async def holiday_message():
+    today = dt.datetime.now(ZoneInfo("America/Los_Angeles")).date()
+    month = today.month
+    day = today.day
+    holiday = None
+
+    thanksgiving = get_thanksgiving(today.year)
+    if today == thanksgiving:
+        holiday = "Thanksgiving"
+    elif (month,day) in HOLIDAYS:
+        holiday = HOLIDAYS[(month,day)]
+    else:
+        return
+
+    for guild in client.guilds:
+        conn,cur = create_connection()
+        channel = get_channel(1, guild, cur)
+        close_connection(conn, cur)
+        if channel is None:
+            continue
+        h_message = create_holiday_message(holiday)
+        await channel.send(h_message, allowed_mentions= discord.AllowedMentions(everyone=True))
+    
+
+def create_holiday_message(holiday=None):
+    # for testing
+    if holiday is None:
+        holiday = random.choice(list(HOLIDAYS.values()))
+    variant = random.randint(1,3)
+    #********************************************
+    message = ""
+    match holiday:
+            case "Halloween":
+                match variant:
+                    case 1:
+                        message = (
+                            "Halloween, everyone! 🎃👻\n I hope you're all having a wonderful evening! "
+                            "I considered using a little magic to make tonight more interesting, but I decided that might be a bit excessive. "
+                            "Besides, I'm sure tonight will be entertaining enough. Enjoy yourselves!"
+                        )
+                    case 2:
+                        message = (
+                            "@everyone Happy Halloween, everyone! 🎃\n" 
+                            "My boss asked me to prepare a holiday announcement, and naturally, I made sure it was done properly. "
+                            "I hope you all enjoy the festivities! Now, if you'll excuse me, I have some good-looking sweets to dig into. 🍬🍬"
+                        )
+                    case 3:
+                        message = (
+                            "@everyone Happy Halloween, everyone! \nI must admit, an occasion celebrating ghosts isn't exactly what I would call fun, "
+                            "but I suppose the sweets do make it bearable 😑. Anyway, enjoy yourselves!"
+                        )
+            case "Thanksgiving":
+                match variant:
+                    case 1:
+                        message = (
+                            "@everyone Happy Thanksgiving, everyone! 🦃🍂 "
+                            "I hope you're all able to spend today with people you care about and take some time to appreciate what you have. "
+                            "Even the Church of Seiros would approve of that, I'm sure. Now, enough with the sentimental stuff. "
+                            "There's a feast waiting, and I certainly don't intend to miss it! 🍗🍰"
+                        )
+                    case 2:
+                        message = (
+                            "@everyone Happy Thanksgiving, everyone! 🦃 \n"  
+                            "I hope you all have a wonderful day filled with good food and good company! As for me, I intend to make the most of the occasion myself. " 
+                            "After all, I have no intention of letting perfectly good food go to waste. 🍰"
+                        )
+                    case 3:
+                        message = (
+                            "@everyone Happy Thanksgiving! 🦃🍗\n "
+                            "I suppose even the Church of Seiros would approve of taking a day to appreciate the people around us."
+                            "Now, if you'll excuse me, I have some very important research to conduct regarding which dessert deserves a second helping. 😋"
+                        )
+            case "Christmas":
+                match variant:
+                    case 1:
+                        message = (
+                            "@everyone Merry Christmas, everyone from both me and the boss! 🎄🎁 \n"
+                            "I hope you're all enjoying the holiday! Now, if you'll excuse me, I have some presents to investigate. "
+                            "I mean... someone has to make sure everything is in order. 🎁"
+                        )
+                    case 2:
+                        message = (
+                            "@everyone Merry Christmas, everyone! 🎄✨ \nMy boss asked me to make sure everyone received a proper Christmas greeting, and naturally, I was happy to oblige! "
+                            "I even considered using a little magic to make the decorations more impressive, but I decided that might be showing off. ...A little. ✨"
+                        )
+                    case 3:
+                        message = (
+                            "@everyone Merry Christmas! 🎄✨ \n"
+                            "It's a wonderful time of year. I remember celebrating wonderful occasions like this back at the Officers' Academy."
+                            "I've been looking forward to this for quite some time, and not simply because of the presents. "
+                        )
+            case "New Year's Day":
+                match variant:
+                    case 1:
+                        message = (
+                            "@everyone Happy New Year! 🎆🎉 \n"
+                            "We've made it through another year, and I hope the next one brings all of you plenty of happiness and good memories. "
+                            "My boss and I will be doing our best to make this year even better than the last. "
+                            "So, let's make the most of it! Here's to a new beginning! 🥂✨"
+                        )
+                    case 2:
+                        message = (
+                            "@everyone Happy New Year, everyone! 🎆✨ \n"
+                            "A new year means a fresh start and another opportunity to improve ourselves. "
+                            "I suppose that's one of the things I learned from being a Golden Deer."
+                            "Anyway, enjoy the celebration, and let's make this a year worth remembering!"
+                        )
+                    case 3:
+                        message = (
+                            "@everyone Happy New Year! 🎉🎆 \n"
+                            "It's strange to think about how much can change in a single year. I've certainly learned that lesson myself "
+                            "from my time at the Officers' Academy and everything after that"
+                            "Now, enough talk—go celebrate! ✨"
+                        )
+            case "Valentine's Day":
+                match variant:
+                    case 1:
+                        message = (
+                            "@everyone Happy Valentine's Day! 💕🌹 \n"
+                            "I hope you all have a wonderful day with the people who are important to you. "
+                            "I've studied plenty of complicated magic, but apparently understanding romance is beyond even me. "
+                            "Now, if you'll excuse me, I believe there are some chocolates with my name on them. 🍫"
+                        )
+                    case 2:
+                        message = (
+                            "@everyone Happy Valentine's Day! 💖 \n"
+                            "A little affection, a little kindness, and a little chocolate never hurt anybody. "
+                            "I hope all of you have a wonderful day filled with good company and at least a few nice surprises. "
+                            "And if you happen to be single, I suppose this is still a perfectly good excuse to enjoy the sweets."
+                        )
+                    case 3:
+                        message = (
+                            "@everyone Happy Valentine's Day! 💕🍫 \n"
+                            "I hope everyone has a wonderful day! Love and romance may be the main attraction today, but personally, I think the real highlight is all the chocolate. "
+                            "...Don't look at me like that! I'm perfectly capable of appreciating both. "
+                            
+                        )
+            case "Independence Day":
+                match variant:
+                    case 1:
+                        message = (
+                            "@everyone Happy Independence Day! 🇺🇸🎆 \nI hope you all have a wonderful Fourth of July! Freedom is certainly something worth celebrating. "
+                            "Claude taught me that people shouldn't be held back by unnecessary barriers, and as a Golden Deer, I suppose I should know a thing or two about that. "
+                            "Anyway, enjoy yourselves! And try not to cause too much trouble with those fireworks."
+                        )
+                    case 2:
+                        message = (
+                            "@everyone Happy Independence Day! 🇺🇸🎆 \nI hope you're all having a wonderful Fourth of July! "
+                            "The fireworks should be entertaining. "
+                            "Although, if you really want to see an impressive display, you could always ask me to demonstrate my magic."
+                        )
+                    case 3:
+                        message = (
+                            "@everyone Happy Independence Day! 🇺🇸🎆 \nI hope you're all enjoying the holiday! "
+                            "There will be plenty of fireworks tonight, so make sure you take the time to enjoy them. "
+                            "Though I should warn you, don't expect me to be impressed too easily. "
+                            "I've seen what real magic can do, after all. ...What? It's not bragging if it's true. 😤"
+                        )
+    return message
 
 
 client.run(os.getenv("DISCORD_TOKEN"), log_handler=handler, log_level=logging.DEBUG)

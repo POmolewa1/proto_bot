@@ -1,9 +1,5 @@
 ## Still to do
 1. guild card needs formatting and the banner color needs to be adjusted
-4. News still needs to be properly adjusted along with the time it searches for games and not sending duplicate news the same day (refreshes daily)
-6. Adding profile through steam also needs to handle ID NAMES
-7. Need to do daily reset
-8. Weekly reset will reset weekly messages
 
 9. Stress test everything
 

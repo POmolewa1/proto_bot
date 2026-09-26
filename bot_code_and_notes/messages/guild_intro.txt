@@ -1,0 +1,38 @@
+Hello everyone!
+
+My name is Lysithea, head of House Ordelia and a proud former member of the Golden Deer.
+I was recently hired to serve as this server's assistant by someone you may know.
+My main job is to keep track of everyone's activity, games, XP, and a few other things around the server.
+
+Here are some things you can do:
+
+
+**/guildcard (any member)**
+View your profile, level, XP, and the games you've played.
+
+**/linksteam (Steam ID)**
+Link your Steam account so I can keep track of your games and keep your library up to date.
+*(No password is needed. You'll only need your public Steam ID—the numbers in your Steam profile URL, not your username. Use /help for more information.)*
+
+**/help**
+See the commands available to you.
+
+I'll also keep track of your activity in the background, including the games you play, time spent playing, and other activity that contributes to your XP. You don't need to do anything special to earn it.
+
+I'll also keep everyone informed about things like weekly statistics, MVPs, game news, and the occasional holiday announcement. Naturally, I'll make sure everything is handled properly.
+
+If you have any questions, feel free to use **/help** or ask my boss directly. I'm sure they'll be happy to explain everything.
+
+Now, I believe that covers the important details. Here is a quick message from my boss.
+
+---
+
+**Hey guys, it's me, MegaJoltz.**
+
+This is a little project that I've been working on for a little over a month now, and I hope you guys enjoy it. I wanted to make something cool for the guild that we could just have running in the background.
+
+All of the code is open source and available on my GitHub if anyone is curious. If you guys notice any bugs, please feel free to DM me so I can fix them.
+
+(link)
+
+Thank you!

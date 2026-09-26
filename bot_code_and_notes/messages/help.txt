@@ -1,0 +1,30 @@
+```text
+📖 Lysithea Help
+
+Here are some of the things I can do!
+
+👤 PROFILE & ACCOUNT
+
+/guildcard (Any Guild Member)
+View your profile, level, XP, and games.
+
+/link_steam (Steam ID)
+Link your Steam account so I can keep track of your games. Linking your account is 100% safe, I won't even be able to tell if you actually own the account or not.
+how it works:
+Everyone has a public Steam ID that you can see if you go to anyone's profile and look at the url. 
+For example if you open steam and go to your profile or any other profile you would see something like https://steamcommunity.com/profiles/**xxxxxxxxxxxxxxxxxx**/
+the (xxxxxxxxxxxxxxxxxx) is that accounts Steam ID. All you need to do is use /link_steam (xxxxxxxxxxxxxxxxxx) and hit confirm if that is the profile you want to sync.
+
+** IF YOU ARE NOT FRIENDS WITH MY BOSS ON STEAM YOUR PROFILE WILL HAVE TO BE SET TO PUBLIC **
+- This is because basically what I'm doing is looking up your profile on steam and then looking at your games 1 by 1 just like any normal steam user can.
+I do these searches with my Boss' account so that's why if your friends with him I can also see your account.
+
+**What about the games I would rather people not see...**
+DON'T WORRY 
+- I cannot see any games that are marked private in your library. I cannot see anything that my Boss couldn't see if he checked your profile.
+Also I only check your profile once a day at 12:00 AM. 
+
+/unlink_steam
+Unlink your Steam account and remove your Steam account information. 
+Any games that I've seen you play online will still be recorded so you won't loose any data
+```

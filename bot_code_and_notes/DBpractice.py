@@ -218,7 +218,10 @@ def initialize_db():
     cur.execute("""CREATE TABLE IF NOT EXISTS todays_news (
         id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
         article_title TEXT,
-        gid BIGINT UNIQUE
+        gid BIGINT,
+        guild_id BIGINT,
+        date_added TIMESTAMPTZ,
+        UNIQUE(gid, guild_id)
     );
     """)    
     logger.info(f"Verified table: todays_news")
@@ -243,6 +246,7 @@ def initialize_db():
 
             game_name VARCHAR(255),
             game_id INT UNIQUE
+            
         );
         """
     )
@@ -355,23 +359,23 @@ def get_app_id(gid ,cur : db.extensions.cursor):
     return result[1]
 
 
-def add_to_todays_news_database(news_title, gid, cur : db.extensions.cursor):
+def add_to_todays_news_database(news_title, gid, guild_id, cur : db.extensions.cursor):
     logger.info(f"Adding title : {news_title} with new_id : {gid} to todays_news db")
     print(f"Adding title : {news_title} with new_id : {gid} to todays_news db")
-
+    today = dt.datetime.now(timezone.utc)
     cur.execute(
-        """INSERT INTO todays_news (article_title, gid)
-            VALUES (%s, %s)
+        """INSERT INTO todays_news (article_title, gid, guild_id, date_added)
+            VALUES (%s, %s, %s, %s)
             ON CONFLICT DO NOTHING
-        """,(news_title, gid)
+        """,(news_title, gid, guild_id, today)
     )
 
-#BOOKMARK THETA just add guild as well
-def get_filtered_news_gids(cur : db.extensions.cursor):
+def get_filtered_news_gids(guild_id, cur : db.extensions.cursor):
     news_filter = []
     cur.execute(
         """SELECT gid FROM todays_news
-        """
+            WHERE guild_id = %s
+        """,(guild_id,)
     )
 
     results = cur.fetchall()
@@ -386,68 +390,69 @@ def get_filtered_news_gids(cur : db.extensions.cursor):
 
     return news_filter
 
-def process_member_games_into_news(member_id_list):
+def process_member_games_into_news(member_id_list, guild_id):
     today = dt.datetime.now(timezone.utc)
     conn,cur = create_connection()
-    logger.info(f"Started processing game news for members : {member_id_list}")
-    # for each person in the list get all the games that they played that month
-    # add those games to a list if they are not already added
-    # return all those game ids
-    uid_list = []
-    for member_id in member_id_list:
-        user_id = get_user_id(member_id, cur)
-        uid_list.append(user_id)
+    try:
+        logger.info(f"Started processing game news for members : {member_id_list}")
+        # for each person in the list get all the games that they played that month
+        # add those games to a list if they are not already added
+        # return all those game ids
+        uid_list = []
+        for member_id in member_id_list:
+            user_id = get_user_id(member_id, cur)
+            uid_list.append(user_id)
 
-    user_lookup = dict(zip(uid_list, member_id_list))
-    news = {}
+        user_lookup = dict(zip(uid_list, member_id_list))
+        news = {}
 
-    # BOOKMARK get the time ranges correct
-    last_3_weeks = today - dt.timedelta(weeks=3)
+        last_3_weeks = today - dt.timedelta(weeks=3)
 
-    cur.execute(
-        """SELECT user_id, game_id, last_time_played FROM user_games
-            WHERE last_time_played IS NOT NULL
-            AND last_time_played >= %s
-            ORDER BY last_time_played
-        """,(last_3_weeks,)
-    )
+        cur.execute(
+            """SELECT user_id, game_id, last_time_played FROM user_games
+                WHERE last_time_played IS NOT NULL
+                AND last_time_played >= %s
+                ORDER BY last_time_played
+            """,(last_3_weeks,)
+        )
 
-    results = cur.fetchall()
-    if not results:
-        logger.info("No recent games found")
-        return {}
+        results = cur.fetchall()
+        if not results:
+            logger.info("No recent games found")
+            return {}
 
-    #print(date_cutoff)
-    for result in results:
-        uid = result[0]
-        if uid not in uid_list:
-            continue
-        discord_id = user_lookup[uid]
-        gid = result[1]
-        #last_played = result[2]
-        
-        app_id = get_app_id(gid, cur)
-        if app_id is None:
-            continue
-        if app_id not in news:
-            data = {
-                'relavent_members' : [],
-                'news_articles' : []
-            }
-            news[app_id] = data
-            news[app_id]['relavent_members'].append(discord_id)
-        else:
-            news[app_id]['relavent_members'].append(discord_id)
+        #print(date_cutoff)
+        for result in results:
+            uid = result[0]
+            if uid not in uid_list:
+                continue
+            discord_id = user_lookup[uid]
+            gid = result[1]
+            #last_played = result[2]
+            
+            app_id = get_app_id(gid, cur)
+            if app_id is None:
+                continue
+            if app_id not in news:
+                data = {
+                    'relavent_members' : [],
+                    'news_articles' : []
+                }
+                news[app_id] = data
+                news[app_id]['relavent_members'].append(discord_id)
+            else:
+                news[app_id]['relavent_members'].append(discord_id)
 
-    #print(news)
-    news_filter = get_filtered_news_gids(cur)
-    game_news, add_to_filter = get_game_news_from_steam(news, news_filter)
-    for item in add_to_filter:
-        add_to_todays_news_database(item[0], item[1], cur)
+        #print(news)
+        news_filter = get_filtered_news_gids(guild_id, cur)
+        game_news, add_to_filter = get_game_news_from_steam(news, news_filter)
+        for item in add_to_filter:
+            add_to_todays_news_database(item[0], item[1], guild_id, cur)
 
-    close_connection(conn, cur)
-
-    return game_news
+        return game_news
+    
+    finally:
+        close_connection(conn, cur)
 
 # conn,cur = create_connection()
 # process_member_games_into_news([385277889404207105,938183066948612096],cur)
@@ -1262,7 +1267,7 @@ def add_game_to_database(name, IGDBClient : IGDBClient , cur : db.extensions.cur
             if prev_img is not None and img is None:
                 logger.warning(f"Tried to update game: {name} with an image that doesn't exist. Keeping existing image")
                 return
-            #BOOKMARK THETA
+            
         cur.execute(
             """INSERT INTO games (game_name, on_steam, img, steam_app_id, steam_price)
                 VALUES(%s,%s,%s,%s,%s)
@@ -1527,7 +1532,7 @@ def link_steam_library(library_data : dict, steam_profile_data : dict, member_id
             today = dt.datetime.now(timezone.utc)
             logger.info(f"Starting syncing process for user : {uid} with gid {gid}")
             old_time_seconds = get_curr_steam_playtime(uid, gid, cur)
-            # BOOKMARK might be better to go by the last time that specific game was played
+            
             last_sync = get_last_sync_date(uid, cur)
             if (
                 old_time_seconds is not None 
@@ -2077,7 +2082,7 @@ def get_week_long_server_data(guild, cur : db.extensions.cursor):
     if not results:
         logger.warning(f"Could not find data for guild id : {guild_id}")
         return None, None
-    # BOOKMARK going to have to look at all the games first
+    
     for result in results:
         activity_type = result[4]
 
@@ -2231,7 +2236,7 @@ def add_user_xp(member_id, guild_id, add_value, cur : db.extensions.cursor):
         )
 
 def update_user_message_count(member_id, guild_id, cur : db.extensions.cursor):
-    # BOOKMARK Need to reset weekly messages
+    
     uid = get_user_id(member_id, cur)
     if uid is None:
         return
@@ -2531,6 +2536,50 @@ def auto_sync_toggle_set(member_id, value):
             """,(toggle,)
         )
         return toggle
+    finally:
+        close_connection(conn, cur)
+
+
+def weekly_cleanup():
+    conn,cur = create_connection()
+
+    try:
+        logger.info("resetting weekly user messages")
+        print("resetting weekly user messages")
+        print("Cleaning up news filter from the last 2 days")
+
+        cur.execute(
+            """UPDATE guilds_users
+                SET messages_sent_this_week = 0
+            """
+        )
+    finally:
+        close_connection(conn, cur)
+
+def daily_cleanup():
+    
+    conn,cur = create_connection()
+    today = dt.datetime.now(timezone.utc)
+    try:
+        logger.info("Cleaning up news filter from the last 2 days")
+        print("Cleaning up news filter from the last 2 days")
+
+        last_2_days = today - dt.timedelta(days=2)
+        cur.execute(
+            """DELETE FROM todays_news
+                WHERE date_added < %s
+            """,(last_2_days,)
+        )
+
+        logger.info("Cleaning up server log from the last 2 weeks")
+        print("Cleaning up server log from the last 2 days")
+
+        last_2_weeks = today - dt.timedelta(weeks=2)
+        cur.execute(
+            """DELETE FROM server_log
+                WHERE start_time < %s
+            """,(last_2_weeks,)
+        )
     finally:
         close_connection(conn, cur)
 
