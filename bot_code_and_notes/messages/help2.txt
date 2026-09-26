@@ -1,23 +1,29 @@
-```text
-/toggle_steam_sync
-If you have a steam account linked it will be automatically synced at the end of the day. If your profile is set to private and you aren't friends with my boss, auto-sync will be turned off.
-If sync is turned off and you want it to be turned back on use this command. You can check to see if auto-sync is on by using /guildcard (your profile) and then hitting next till you get to your steam page.
-At the very bottom of your steam page you will see the last time your account was synced and if auto sync is on.
+`/toggle_steam_sync`
+If you have a Steam account linked, it will automatically be synced once per day at 12:00 AM.
 
-🎮 ACTIVITY & XP
+If your Steam profile is private and you aren't friends with the bot owner's Steam account, automatic syncing will be turned off.
+
+If syncing is turned off and you want to turn it back on, use this command.
+
+You can check whether auto-sync is enabled by using `/guildcard` on your own profile and pressing **Next** until you reach your Steam page. At the bottom of the Steam page, you'll see the last time your account was synced and whether auto-sync is currently enabled.
+
+━━━━━━━━━━━━━━━━━━━━
+
+🎮 **ACTIVITY & XP**
 
 Your activity is tracked automatically in the background.
 
-Playing games, spending time in voice calls, streaming, and other
-activity can contribute to your XP.
+Playing games, spending time in voice calls, streaming, and other activities can contribute to your XP.
 
 You don't need to manually start or stop anything.
 
-I can only track your games when you have your profile online. If you've ever seen someone with Playing : *** under their name that is what I look for.
-If you link your steam though I will still be able to record your playtime if you're account is not set to private or if you are friends with my Boss on Steam
+I can track your games when your Discord activity is visible. If you've ever seen someone with **Playing: [game]** underneath their name, that's the information I look for.
 
+If you have Steam linked, I can also record your Steam playtime when your Steam profile is public or when you are Steam friends with the bot owner.
 
-🏆 WEEKLY STATS & MVP
+━━━━━━━━━━━━━━━━━━━━
+
+🏆 **WEEKLY STATS & MVP**
 
 Weekly statistics keep track of things such as:
 
@@ -27,36 +33,14 @@ Weekly statistics keep track of things such as:
 • Streaming
 • Messages
 
-Each week, an MVP is selected based on their activity.
+At the end of each week, an MVP is selected based on their activity.
 
-Points are awarded as follows:
-6 points / 1 hour of streaming
+**MVP Points:**
 
-3 points / 1 hour in calls
+• 6 points / hour of streaming
+• 3 points / hour in voice calls
+• 2 points / hour of gaming
 
-2 points / 1 hour of gaming 
+XP uses a similar point system.
 
-(xp follows a similar point system)
-
-📰 GAME NEWS
-
-I'll periodically check the games being played by members of the
-server and look for relevant game news.
-
-Don't worry, I won't flood the server with every article I find.
-I'll make sure previously posted articles aren't repeated.
-
-
-🎉 HOLIDAYS
-
-I'll occasionally send announcements for holidays and other
-special occasions.
-
-Naturally, I'll make sure they're handled properly.
-
-
-❓ STILL NEED HELP?
-
-If you're having trouble with something or think you've found a bug,
-ask my boss directly. I'm sure they'll be happy to help.
-```
+━━━━━━━━━━━━━━━━━━━━

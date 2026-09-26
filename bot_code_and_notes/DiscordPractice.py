@@ -5,6 +5,7 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 import logging
+from logging.handlers import RotatingFileHandler
 # import datetime as dt
 # from datetime import timezone
 from SteamPractice import *
@@ -16,7 +17,13 @@ import random
 from zoneinfo import ZoneInfo
 import calendar
 
-handler = logging.FileHandler(filename="discord.log", encoding="utf-8", mode ='w')
+#handler = logging.FileHandler(filename="discord.log", encoding="utf-8", mode ='w')
+handler = RotatingFileHandler(
+    filename="discord.log",
+    maxBytes=5 * 1024 * 1024,  # 5 MB
+    backupCount=3,
+    encoding="utf-8"
+)
 logging.basicConfig(level= logging.DEBUG, handlers=[handler], format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
 intents = discord.Intents.default()
@@ -60,18 +67,18 @@ LEVEL_THRESHOLDS = [
 RANK_TITLES = {
     1 : "Recruit",
     2 : "Rank 2-er",
-    3 : "Rank 3-er",
-    4 : "Rank 4-er",
+    3 : "IMPOSTER???",
+    4 : "Platinum",
     5 : "Rank 5-er",
     6 : "Rank 6-er",
-    7 : "Rank 7-er",
+    7 : "Purple Guy",
 }
 
 banner_color = {
             1 : discord.Color.from_str("#444443"),
             2 : discord.Color.from_str("#AF6600"),
             3 : discord.Color.from_str("#CF0303"),
-            4 : discord.Color.from_str("#E0AE09"),
+            4 : discord.Color.from_str("#00FFFF"),
             5 : discord.Color.from_str("#00FF08"),
             6 : discord.Color.from_str("#3300FF"),
             7 : discord.Color.from_str("#CE00C0")
@@ -623,6 +630,9 @@ def get_help_message():
 def get_help_message2():
     with open("messages/help2.txt", "r", encoding="utf-8") as file:
         return file.read()
+def get_help_message3():
+    with open("messages/help3.txt", "r", encoding="utf-8") as file:
+        return file.read()
     
 class Client(commands.Bot):
     #e = Embedding("https://cdn.discordapp.com/avatars/385277889404207105/fb8b1cae3be44ba623caee0610343864.png?size=1024")
@@ -668,8 +678,8 @@ class Client(commands.Bot):
         
         if message.author == self.user:
             return
-        if message.content.startswith("hello"):
-            await message.channel.send(f"Hi there {message.author.display_name}")
+        # if message.content.startswith("hello"):
+        #     await message.channel.send(f"Hi there {message.author.display_name}")
             #await message.channel.send(f"Hi there {message.author.display_name}", embed = self.e)
             #await message.channel.send(f"Hi there {message.author.display_name}", embeds = [self.e,self.e,self.e,self.e])
             #await message.channel.send(f"Hi there {message.author.display_avatar.url}")
@@ -819,103 +829,18 @@ class Client(commands.Bot):
 
         await asyncio.to_thread(self.verify_guilds_and_members)
         await verify_MVP_role(guild)
-        
-        
-aaaa = {
-    "Alex": {
-        "playtime": 4820,
-        "call_time": 1630,
-        "stream_time": 740,
-        "messages": 18,
-        "mvp_mult": 100,
-        "score": 0
-    },
-    "Jordan": {
-        "playtime": 3150,
-        "call_time": 920,
-        "stream_time": 450,
-        "messages": 25,
-        "mvp_mult": 100,
-        "score": 0
-    },
-    "Sam": {
-        "playtime": 2100,
-        "call_time": 1440,
-        "stream_time": 360,
-        "messages": 12,
-        "mvp_mult": 110,
-        "score": 0
-    },
-    "Taylor": {
-        "playtime": 1650,
-        "call_time": 720,
-        "stream_time": 120,
-        "messages": 20,
-        "mvp_mult": 100,
-        "score": 0
-    },
-    "Morgan": {
-        "playtime": 980,
-        "call_time": 1800,
-        "stream_time": 540,
-        "messages": 25,
-        "mvp_mult": 90,
-        "score": 0
-    },
-    "Chris": {
-        "playtime": 4200,
-        "call_time": 300,
-        "stream_time": 0,
-        "messages": 8,
-        "mvp_mult": 105,
-        "score": 0
-    },
-    "Jamie": {
-        "playtime": 1350,
-        "call_time": 600,
-        "stream_time": 900,
-        "messages": 16,
-        "mvp_mult": 100,
-        "score": 0
-    },
-    "Riley": {
-        "playtime": 2700,
-        "call_time": 480,
-        "stream_time": 180,
-        "messages": 25,
-        "mvp_mult": 95,
-        "score": 0
-    },
-    "Casey": {
-        "playtime": 750,
-        "call_time": 2100,
-        "stream_time": 300,
-        "messages": 14,
-        "mvp_mult": 100,
-        "score": 0
-    },
-    "Caiatl, Empress of Cabussy": {
-        "playtime": 3600,
-        "call_time": 1080,
-        "stream_time": 660,
-        "messages": 22,
-        "mvp_mult": 115,
-        "score": 0
-    }
-}
 
-# bbbb = {
-#     "Alex": "(37.49 + 9.06 + 0.82 + 18.00) * 1.00 = 65.37",
-#     "Jordan": "(24.50 + 5.11 + 0.50 + 25.00) * 1.00 = 55.11",
-#     "Sam": "(16.33 + 8.00 + 0.40 + 12.00) * 1.10 = 40.40",
-#     "Taylor": "(12.83 + 4.00 + 0.13 + 20.00) * 1.00 = 36.96",
-#     "Morgan": "(7.62 + 10.00 + 0.60 + 25.00) * 0.90 = 38.90",
-#     "Chris": "(32.67 + 1.67 + 0.00 + 8.00) * 1.05 = 44.45",
-#     "Jamie": "(10.50 + 3.33 + 1.00 + 16.00) * 1.00 = 30.83",
-#     "Riley": "(21.00 + 2.67 + 0.20 + 25.00) * 0.95 = 46.92",
-#     "Casey": "(5.83 + 11.67 + 0.33 + 14.00) * 1.00 = 31.83",
-#     "Caiatl, Empress of Cabussy": "(28.00 + 6.00 + 0.73 + 22.00) * 1.15 = 65.13"
-# }
+        conn,cur = create_connection()
+        try:
+            channel = get_channel(1, guild, cur)
+        finally:
+            close_connection(conn, cur)
+        if channel is None:
+            return
+        
+        message = get_guild_intro()
+        await channel.send(message)
+
 
 # Bot command helpers
 #-----------------
@@ -1482,6 +1407,8 @@ async def toggle_sync(interaction: discord.Interaction):
     message = get_help_message()
     await interaction.response.send_message(message, ephemeral=True)
     message = get_help_message2()
+    await interaction.followup.send(content=message, ephemeral=True)
+    message = get_help_message3()
     await interaction.followup.send(content=message, ephemeral=True)
 
 

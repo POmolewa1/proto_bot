@@ -1,30 +1,54 @@
-```text
-📖 Lysithea Help
+📖 **Lysithea Help**
 
 Here are some of the things I can do!
 
-👤 PROFILE & ACCOUNT
+━━━━━━━━━━━━━━━━━━━━
 
-/guildcard (Any Guild Member)
+👤 **PROFILE & ACCOUNT**
+
+`/guildcard`
 View your profile, level, XP, and games.
+You can also view another guild member's card.
 
-/link_steam (Steam ID)
-Link your Steam account so I can keep track of your games. Linking your account is 100% safe, I won't even be able to tell if you actually own the account or not.
-how it works:
-Everyone has a public Steam ID that you can see if you go to anyone's profile and look at the url. 
-For example if you open steam and go to your profile or any other profile you would see something like https://steamcommunity.com/profiles/**xxxxxxxxxxxxxxxxxx**/
-the (xxxxxxxxxxxxxxxxxx) is that accounts Steam ID. All you need to do is use /link_steam (xxxxxxxxxxxxxxxxxx) and hit confirm if that is the profile you want to sync.
+`/link_steam`
+Link your Steam account so I can keep track of your games.
 
-** IF YOU ARE NOT FRIENDS WITH MY BOSS ON STEAM YOUR PROFILE WILL HAVE TO BE SET TO PUBLIC **
-- This is because basically what I'm doing is looking up your profile on steam and then looking at your games 1 by 1 just like any normal steam user can.
-I do these searches with my Boss' account so that's why if your friends with him I can also see your account.
+**Is it safe?**
+Yes! Your Steam ID is public information, and giving it to Lysithea does **not** give me access to your Steam account. I cannot log into your account, see your password, or make changes to your account.
 
-**What about the games I would rather people not see...**
-DON'T WORRY 
-- I cannot see any games that are marked private in your library. I cannot see anything that my Boss couldn't see if he checked your profile.
-Also I only check your profile once a day at 12:00 AM. 
+**How does it work?**
 
-/unlink_steam
-Unlink your Steam account and remove your Steam account information. 
-Any games that I've seen you play online will still be recorded so you won't loose any data
-```
+Every Steam profile has a public Steam ID. You can find it in the URL of a Steam profile.
+
+For example:
+
+`https://steamcommunity.com/profiles/xxxxxxxxxxxxxxxxxx/`
+
+The `xxxxxxxxxxxxxxxxxx` portion is the Steam ID.
+
+Simply use:
+
+`/link_steam xxxxxxxxxxxxxxxxxx`
+
+Lysithea will then ask you to confirm that the profile is yours before linking it.
+
+**🔒 What needs to be public?**
+
+If you are **not Steam friends with the bot owner (MegaJoltz)**, your Steam profile needs to be set to public for Lysithea to retrieve your games.
+
+This is because Lysithea looks up your Steam profile and reads the game information that is publicly visible on it.
+
+If you **are** Steam friends with the bot owner (MegaJoltz), Lysithea can access the information that the bot owner can see on your profile.
+
+**🎮 What about games I don't want people to see?**
+
+Don't worry!
+
+Lysithea **cannot see games that are hidden by Steam's privacy settings**. It can only access the game information that is visible to the bot owner's Steam account.
+
+Lysithea also only checks your Steam profile **once per day at 12:00 AM**. It does not constantly monitor your Steam account.
+
+`/unlink_steam`
+Unlink your Steam account and remove your stored Steam account information.
+
+Any games Lysithea has already recorded from your activity will **remain in the server's records**, so unlinking your Steam account will not erase your existing game history.
