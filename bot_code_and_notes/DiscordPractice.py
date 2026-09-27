@@ -891,6 +891,8 @@ def create_activity_flair():
         logger.info(f"New activity list : {ACTIVITY_LIST}")
     
     variant = ACTIVITY_LIST.pop()
+    logger.info(f"Activity list : {ACTIVITY_LIST}")
+    print(f"Activity list : {ACTIVITY_LIST}")
 
     match variant:
         case 1:
@@ -915,6 +917,8 @@ def create_activity_flair():
             message = "Being blessed by Sothis 😇"
 
     return message
+
+
 def get_level_snapshot(member_id, guilds):
     users_guilds_and_levels = {}
     guild_table = {}
