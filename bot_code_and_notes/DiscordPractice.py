@@ -75,9 +75,9 @@ RANK_TITLES = {
 }
 
 banner_color = {
-            1 : discord.Color.from_str("#444443"),
-            2 : discord.Color.from_str("#AF6600"),
-            3 : discord.Color.from_str("#CF0303"),
+            1 : discord.Color.from_str("#9A6900"),
+            2 : discord.Color.from_str("#C6C6C6"),
+            3 : discord.Color.from_str("#E90000"),
             4 : discord.Color.from_str("#00FFFF"),
             5 : discord.Color.from_str("#3300FF"),
             6 : discord.Color.from_str("#00FF08"),
@@ -226,7 +226,7 @@ class GuildCard(discord.Embed):
         self.set_thumbnail(url = self.profile_picture)
 
         level = get_user_level(member_id, guild_id)
-        rank = get_user_rank_title(level)
+        rank = get_user_rank(level)
         self.banner_color = banner_color[rank]
         self.color = self.banner_color
         
@@ -645,12 +645,20 @@ class Client(commands.Bot):
     #e = Embedding("https://cdn.discordapp.com/avatars/385277889404207105/fb8b1cae3be44ba623caee0610343864.png?size=1024")
     async def on_ready(self):
         print(f"Logged on as {self.user}")
+
+        #bookmark theta
+        await self.change_presence(
+            activity=discord.Activity(
+                type = discord.ActivityType.watching, name = create_activity_flair()
+            )
+        )
         
         initialize_db()
         self.verify_guilds_and_members()
         for guild in self.guilds:
             await verify_MVP_role(guild)
-
+            await verify_roles_for_guild_and_members(guild)
+          
         try:
             # guild = discord.Object(id = os.getenv("GUILD_ID"))
             # synced = await self.tree.sync(guild=guild)
@@ -870,6 +878,43 @@ class Client(commands.Bot):
 
 # Bot command helpers
 #-----------------
+ACTIVITY_LIST = []
+
+def create_activity_flair():
+    message = ""
+
+    if len(ACTIVITY_LIST) == 0:
+        for i in range(7):
+            ACTIVITY_LIST.append(i+1)
+        random.shuffle(ACTIVITY_LIST)
+        print(f"New activity list : {ACTIVITY_LIST}")
+        logger.info(f"New activity list : {ACTIVITY_LIST}")
+    
+    variant = ACTIVITY_LIST.pop()
+
+    match variant:
+        case 1:
+            message = "Reminiscing on Academy times 🎓"
+
+        case 2:
+            message = "🎂 Baking a cake 🎂"
+
+        case 3:
+            message = "Learning new spells 🪄🪄"
+
+        case 4:
+            message = "Casually riding a pegasus 🦄🪽"
+
+        case 5:
+            message = "Respeccing into a tank 🛡️"
+
+        case 6:
+            message = "🍰 Eating too many sweets 🍬🍡"
+
+        case 7:
+            message = "Being blessed by Sothis 😇"
+
+    return message
 def get_level_snapshot(member_id, guilds):
     users_guilds_and_levels = {}
     guild_table = {}
@@ -1342,7 +1387,7 @@ def linking_process(user_profile, interaction):
     link_steam_library(game_library, user_profile, interaction.user.id, cur, conn)
     close_connection(conn,cur)
 
-def get_user_rank_title(user_level):
+def get_user_rank(user_level):
     rank = (user_level - 1) // 3 + 1
 
     if rank >= 7:
@@ -1363,6 +1408,35 @@ def get_user_level(member_id, guild_id):
     return level
 
 
+def create_flare():
+    variant = random.randint(1,7)
+    message = ""
+
+    match variant:
+        case 1:
+            message = "Another level! I'd say you've earned yourself a sweet 🍰."
+
+        case 2:
+            message = "Another achievement recorded. I suppose your growth is becoming quite remarkable. 📜"
+
+        case 3:
+            message = "Good work! Hm... I think a reward is in order ✨ "
+
+        case 4:
+            message = "I would assume even Lady Rhea would praise such an accomplishment. 👏"
+
+        case 5:
+            message = "You remind me a little of myself during my time at the Officers Academy 🎓"
+
+        case 6:
+            message = "Your achienvemnt shines just as bright as any Crest. Well... perhaps not as bright as mine 🤭"
+
+        case 7:
+            message = "Not bad. That should mean a lot coming from such an esteemed member of House Ordelia. 😌"
+
+    return message
+
+
 async def level_up_message(prev_level, new_level, user_id, guild : discord.Guild):
     conn,cur = create_connection()
     level_up_channel = get_channel(2, guild, cur)
@@ -1379,8 +1453,17 @@ async def level_up_message(prev_level, new_level, user_id, guild : discord.Guild
 
     await asyncio.to_thread(update_user_level, new_level, guild.id, user_id)
 
+    await verify_user_role(guild.get_member(user_id), guild)
+    info = (
+        f"Congrats {user.mention}!!\n" 
+        "```text\n"
+        f"You leveled up from lvl {prev_level} {RANK_TITLES[get_user_rank(prev_level)]} -> lvl {new_level} {RANK_TITLES[get_user_rank(new_level)]}"
+        "```"
+    )
+    added_flair = create_flare()
+    message = info + added_flair +  "\n\n---"
     await level_up_channel.send(
-        content= f"Congrats {user.mention} leveled up from {prev_level} {RANK_TITLES[get_user_rank_title(prev_level)]}-> {new_level} {RANK_TITLES[get_user_rank_title(new_level)]}",
+        content= message,
         embed= server, 
         view = view
     )
@@ -1401,6 +1484,79 @@ async def syncing_process_task(member_id, guilds):
             if new_snapshot[guild_id] != snapshot[guild_id]:
                 print(f"User went from level {snapshot[guild_id]} to level {new_snapshot[guild_id]} in server {guild_id}")
                 asyncio.create_task(level_up_message(snapshot[guild_id], new_snapshot[guild_id], member_id, guild_table[guild_id]))
+
+
+async def create_rank_role(role_rank, guild : discord.Guild):
+    conn,cur = create_connection()
+    
+    try:
+        role = await guild.create_role(
+            name = RANK_TITLES[role_rank],
+            color= banner_color[role_rank],
+            hoist= False,
+            mentionable = False
+        )
+        update_guild_role(role_rank, role.id, guild.id)
+        return role
+    
+    finally:
+        close_connection(conn, cur)
+
+
+async def verify_roles_for_guild_and_members(guild : discord.Guild):
+    role_id_list = await asyncio.to_thread(get_all_guild_role_ids, guild.id)
+    if role_id_list is None:
+        logger.error(f"Could not find guild roles for guild : {guild.id}")
+        print(f"Could not find guild roles for guild : {guild.id}")
+        return
+
+    role_list = []
+    for i, role_id in enumerate(role_id_list):
+        role = guild.get_role(role_id)
+        if role is None:
+            role_rank = i+1
+            role = await create_rank_role(role_rank, guild)
+        role_list.append(role)
+
+    for member in guild.members:
+        if member.bot:
+            continue
+        user_rank = get_user_rank(get_user_level(member.id, guild.id))
+        correct_role_for_rank = role_list[user_rank - 1]
+
+        for role in member.roles:
+            if role in role_list and role != correct_role_for_rank:
+                await member.remove_roles(role)
+        if correct_role_for_rank not in member.roles:
+            await member.add_roles(correct_role_for_rank)
+
+
+async def verify_user_role(member : discord.Member, guild : discord.Guild):
+    role_id_list = await asyncio.to_thread(get_all_guild_role_ids, guild.id)
+
+    if role_id_list is None:
+        logger.error(f"Could not find guild roles for guild : {guild.id}")
+        print(f"Could not find guild roles for guild : {guild.id}")
+        return
+
+    role_list = []
+    for i, role_id in enumerate(role_id_list):
+        role = guild.get_role(role_id)
+        if role is None:
+            role_rank = i+1
+            role = await create_rank_role(role_rank, guild)
+        role_list.append(role)
+
+    user_rank = await asyncio.to_thread(get_user_rank, get_user_level(member.id, guild.id))
+    
+    # get_user_rank(get_user_level(member.id, guild.id))
+    correct_role_for_rank = role_list[user_rank - 1]
+
+    for role in member.roles:
+        if role in role_list and role != correct_role_for_rank:
+            await member.remove_roles(role)
+    if correct_role_for_rank not in member.roles:
+        await member.add_roles(correct_role_for_rank)
 
 
 # Bot /commands
@@ -1639,6 +1795,11 @@ async def weekly_game_library_enrichment():
     ]
 )
 async def end_of_day_processes():
+    await client.change_presence(
+        activity=discord.Activity(
+            type = discord.ActivityType.watching, name = create_activity_flair()
+        )
+    )
     await asyncio.to_thread(restart_tracked_activities)
     logger.info("Resting for 2 minutes")
     print("Resting for 2 minutes")

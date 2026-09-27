@@ -46,7 +46,14 @@ def initialize_db():
         weekly_stats_channel_id BIGINT,
         news_channel_id BIGINT,
         level_up_channel_id BIGINT,
-        mvp_role_id BIGINT
+        mvp_role_id BIGINT,
+        r1 BIGINT,
+        r2 BIGINT,
+        r3 BIGINT,
+        r4 BIGINT,
+        r5 BIGINT,
+        r6 BIGINT,
+        r7 BIGINT
     );
     """)
     logger.info(f"Verified table: guilds")
@@ -1817,7 +1824,7 @@ def process_activity_data(uid, from_time, to_time, week_period, activity_calenda
     results = cur.fetchall()
 
     if not results:
-        print("No results")
+        print(f"No results for week period {week_period}")
         return activity_calendar
     
     cur_day = None
@@ -2698,6 +2705,78 @@ async def link_steam_library_async(library_data : dict, steam_profile_data : dic
     logger.info(f"Library fully processed for {steam_name}")
     print(f"Library fully processed for {steam_name}")
 
+TABLE_COLUMN = {
+        1 : "r1",
+        2 : "r2",
+        3 : "r3",
+        4 : "r4",
+        5 : "r5",
+        6 : "r6",
+        7 : "r7"
+    }
+def get_role_id(role_rank, guild_id):
+    
+    if role_rank not in TABLE_COLUMN:
+        print(f"There is no key for rank: {role_rank}")
+        logger.error(f"There is no key for rank: {role_rank}")
+        return
+    
+    conn,cur = create_connection()
+    try:
+        cur.execute(
+            f"""SELECT {TABLE_COLUMN[role_rank]} FROM guilds
+                WHERE guild_id = %s
+            """,(guild_id,)
+        )
+
+        result = cur.fetchone()
+        if result is None:
+            logger.error(f"Could not find a guild with id : {guild_id} with a role table")
+            return
+
+        return result[0]
+    
+    finally:
+        close_connection(conn, cur)
+
+def update_guild_role(role_rank, new_role_id, guild_id):
+
+    if role_rank not in TABLE_COLUMN:
+        print(f"There is no key for rank: {role_rank}")
+        logger.error(f"There is no key for rank: {role_rank}")
+        return
+    
+    conn,cur = create_connection()
+    try:
+        print(f"Updating guild : {guild_id} with new role for rank : {role_rank}")
+        logger.info(f"Updating guild : {guild_id} with new role for rank : {role_rank}")
+
+        cur.execute(
+            f"""UPDATE guilds
+                SET {TABLE_COLUMN[role_rank]} = %s
+                WHERE guild_id = %s
+            """,(new_role_id, guild_id)
+        )
+    finally:
+        close_connection(conn, cur)
+
+def get_all_guild_role_ids(guild_id):
+    conn,cur = create_connection()
+    try:
+        cur.execute(
+            """SELECT r1, r2, r3, r4, r5, r6, r7
+                FROM guilds
+                WHERE guild_id = %s
+            """,(guild_id,)
+        )
+
+        result = cur.fetchone()
+        if result is None:
+            return
+        
+        return list(result)
+    finally:
+        close_connection(conn, cur)
 
 if __name__ == "__main__":
     # resetdb()
