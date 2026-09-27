@@ -21,83 +21,6 @@ class activity_errors(Enum):
     STREAM_IN_PROGRESS = 3
 
 logger = logging.getLogger(__name__)
-#conn = db.connect(host= os.getenv("DB_HOST"), dbname=os.getenv("DB_NAME"), user=os.getenv("USER"), password=os.getenv("PASSWORD"),port=os.getenv("PORT"))
-#cur = conn.cursor()
-# cur.execute("""CREATE TABLE IF NOT EXISTS person (
-#         id INT PRIMARY KEY,
-#         name VARCHAR (255),
-#         age INT,
-#         gender CHAR
-#     );
-#     """)
-
-#     cur.execute("""INSERT INTO person (id, name, age, gender)
-#     VALUES 
-#     (1, 'Steve', 43, 'M'),
-#     (2, 'Mike', 23, 'M'),
-#     (3, 'Patty', 29, 'F'),
-#     (4, 'Sue', 63, 'F'),
-#     (5, 'Lary', 52, 'M');
-#     """)
-
-#     cur.execute("""SELECT * FROM person WHERE age < 50;
-#     """)
-
-#     entries = cur.fetchall()
-
-#     for row in entries:
-#         print(row)
-
-
-#     sql = cur.mogrify("""SELECT * FROM  person WHERE starts_with(name,%s) AND age < %s;""", ("J", 50))
-
-#     cur.execute(sql)
-#     for entry in cur.fetchall():
-#         print(entry)
-
-#     cur.execute("""UPDATE person
-#     SET
-#         name = 'Piablo',
-#         age = 635,
-#         gender = 'O'
-#     WHERE id = 2;
-#     """)
-
-#     cur.execute("""SELECT * FROM person
-#     WHERE id = 2;
-#     """)
-#     for entry in cur.fetchall():
-#         print(entry)
-
-
-#     cur.execute("""ALTER TABLE person
-#     ADD COLUMN credit_score INT;
-#     """)
-
-#     cur.execute("""ALTER TABLE person
-#     DROP COLUMN credit_score
-#     """)
-
-#     cur.execute("""UPDATE person
-#     SET
-#         credit_score = 800
-#     WHERE age > 40 
-#     AND (
-#         starts_with(name, 'J')
-#         OR starts_with(name, 'S')
-#     );
-#     """)
-
-#     cur.execute("SELECT * FROM person")
-
-#     for entry in cur.fetchall():
-#         print(entry)
-
-
-
-#conn.commit()
-#cur.close()
-#conn.close()
 
 def create_connection():
     conn : db.extensions.connection
@@ -1369,20 +1292,24 @@ def check_if_game_is_updatable(game, uid, cur : db.extensions.cursor):
 # Over time these values will become more accurate through regular activity monitoring 
 def update_user_recently_played(uid, steam_id, game_filter, cur : db.extensions.cursor):
     # only update if value is older than the last two weeks or none
+    
     games = get_recently_played_games(steam_id)
+    print(games)
     if games is None or len(games) == 0 or games['total_count'] == 0:
         return
-
+   
     today = dt.datetime.now(timezone.utc)
     date = today
     recency_scaling = dt.timedelta(days = 1)
     for game in games['games']:
         if check_if_game_is_updatable(game, uid, cur):
-    
-            gid = game['appid']
-            if gid in game_filter:
+            
+            appid = game['appid']
+            if appid in game_filter:
                 logger.info(f"Did not update recently played because {game['name']} is in the filter")
                 continue
+
+            gid = get_game_id(appid, cur)
 
             cur.execute(
                 """UPDATE user_games
@@ -1392,6 +1319,7 @@ def update_user_recently_played(uid, steam_id, game_filter, cur : db.extensions.
                     AND game_id = %s
                 """,(date, uid, gid)
             )
+            print(f"Updated rows: {cur.rowcount} of time played")
             new_date = date - recency_scaling
             # Recently played gives the games played within a 14 day period
             # If the user has played over 14 different games we want to make sure we don't scale past our 14 day period
@@ -1570,14 +1498,14 @@ def link_steam_library(library_data : dict, steam_profile_data : dict, member_id
                         """,(date_buffer, uid, gid)
                     )
                     logger.info(f"Updating last_time_played for user : {uid} in game : {gid} but not server hours because the last sync is too old")
-                   
-        cur.execute(
-            """INSERT INTO user_games (user_id, game_id, steam_playtime)
-                VALUES(%s,%s,%s)
-                ON CONFLICT (user_id, game_id)
-                DO UPDATE
-                    SET steam_playtime = EXCLUDED.steam_playtime
-            """,(uid, gid, playtime_seconds))
+                
+            cur.execute(
+                """INSERT INTO user_games (user_id, game_id, steam_playtime)
+                    VALUES(%s,%s,%s)
+                    ON CONFLICT (user_id, game_id)
+                    DO UPDATE
+                        SET steam_playtime = EXCLUDED.steam_playtime
+                """,(uid, gid, playtime_seconds))
     
     # Update general steam data profile 
     # Still need to add account age from the time created in the steam_profile
@@ -1625,7 +1553,8 @@ def remove_user_steam_data(dicord_id, cur: db.extensions.cursor):
     cur.execute(
         """DELETE FROM user_games
             WHERE user_id = %s 
-            AND seen_playing_in_server = false;
+            AND seen_playing_in_server = false
+            AND server_hours = 0
         """,(uid,))
     
     cur.execute(
@@ -2242,7 +2171,7 @@ def update_user_message_count(member_id, guild_id, cur : db.extensions.cursor):
         return
 
     if get_total_weekly_messages(uid, guild_id, cur) < 20:
-        add_user_xp(member_id, guild_id, 1, cur)
+        add_user_xp(member_id, guild_id, 100, cur)
 
     cur.execute(
         """UPDATE guilds_users
@@ -2644,6 +2573,131 @@ def cleardb():
 
     close_connection(conn,cur)
     print("entries in db have been cleared")
+
+LINK_SEM = asyncio.Semaphore(7)
+async def linking_task(app_id, is_sync, game, i, library_data, game_filter, uid, member_id):
+    async with LINK_SEM:
+        await asyncio.to_thread(linking_process_for_threading, app_id, is_sync, game, i, library_data, game_filter, uid, member_id)
+
+
+def linking_process_for_threading(app_id, is_sync, game, i, library_data, game_filter, uid, member_id):
+    conn, cur = create_connection()
+    try:
+        
+        logger.info(f"Processing {game['name']} appid : {app_id} from new game data")
+        print(f"Processing {game['name']} appid : {app_id}")
+        if game_name_in_database(game['name'], cur):
+            add_game_to_database_from_steam_with_name_conflict(game, cur)
+        else:
+            add_game_to_database_from_steam(game,cur)
+            
+        
+        gid = get_game_id(app_id, cur)
+        if gid in game_filter:
+            logger.debug(f"Skipping game {game['name']} because it was found in the filter")
+            return
+        playtime = game['playtime_forever']
+        playtime_seconds = playtime * 60
+        # If sync then we need to do a database lookup to see if the game has a different time played than what is stored
+        # If that is the case we need to update the last time played to today and then add that playtime to the server log
+        # No xp will be given but maybe it can contribute to mvp
+        
+        cur.execute(
+            """INSERT INTO user_games (user_id, game_id, steam_playtime)
+                VALUES(%s,%s,%s)
+                ON CONFLICT (user_id, game_id)
+                DO UPDATE
+                    SET steam_playtime = EXCLUDED.steam_playtime
+            """,(uid, gid, playtime_seconds))
+    finally:
+        close_connection(conn, cur)
+
+async def link_steam_library_async(library_data : dict, steam_profile_data : dict, member_id : int, cur : db.extensions.cursor, conn : db.extensions.connection, is_sync = False):
+    #conn,cur = create_connection()
+
+    uid = get_user_id(member_id, cur)
+    if uid is None:
+        logger.error(f"could not find a uid for member : {member_id}")
+        return
+
+    # need to make sure to do a db lookup to see if the game already exists
+    # might need to use locks to ensure one sync at a time
+    logger.info(library_data)
+
+    game_filter = get_filterd_games(cur)
+
+    tasks = []
+    throttle_counter = 0
+    for i, game in enumerate(library_data['games']):
+        # We might need to check to see if the game is marked as not on steam so we can update it 
+        app_id = game['appid']
+
+        if game_in_db(app_id, cur):
+            if not is_sync:
+                logger.info(f"Processing {game['name']} from existing game data")
+            gid = get_game_id(app_id, cur)
+            if gid in game_filter:
+                logger.debug(f"Skipping game {game['name']} because it was found in the filter")
+                continue
+            playtime = game['playtime_forever']
+            playtime_seconds = playtime * 60
+            cur.execute(
+                """INSERT INTO user_games (user_id, game_id, steam_playtime)
+                    VALUES(%s,%s,%s)
+                    ON CONFLICT (user_id, game_id)
+                    DO UPDATE
+                        SET steam_playtime = EXCLUDED.steam_playtime
+                """,(uid, gid, playtime_seconds))
+        else:
+            tasks.append(asyncio.create_task(linking_task(app_id, is_sync, game, i, library_data, game_filter, uid, member_id)))
+
+        if len(tasks) == 90:
+            await asyncio.gather(*tasks)
+            tasks = []
+            print("resting for 2 minutes")
+            await asyncio.sleep(120)
+
+        if tasks:
+            await asyncio.gather(*tasks)
+    
+    # Update general steam data profile 
+    # Still need to add account age from the time created in the steam_profile
+    # When adding the price make sure to only get the values where the price isn't null
+    steam_name = steam_profile_data['player']['personaname']
+    steam_id = steam_profile_data['player']['steamid']
+    game_count = library_data['game_count']
+    creation_time_stamp = steam_profile_data['player']['timecreated']
+    creation_time = dt.datetime.fromtimestamp(creation_time_stamp, timezone.utc)
+    total_library_cost = get_total_library_cost(member_id, cur)
+    total_steam_time = get_total_steam_time(member_id, cur)
+    profile_pic = steam_profile_data['player']['avatarfull']
+    if total_steam_time is None:
+        total_steam_time = 0
+    cur.execute(
+        """INSERT INTO general_steam_data (user_id, steam_id, account_name, creation_time, steam_games_count, account_cost, total_steam_time, auto_sync_steam, last_sync, profile_pic)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (user_id)
+            DO UPDATE
+                SET 
+                    steam_id = EXCLUDED.steam_id,
+                    account_name = EXCLUDED.account_name,
+                    creation_time = EXCLUDED.creation_time,
+                    steam_games_count = EXCLUDED.steam_games_count,
+                    account_cost = EXCLUDED.account_cost,
+                    total_steam_time = EXCLUDED.total_steam_time,
+                    last_sync = EXCLUDED.last_sync,
+                    profile_pic = EXCLUDED.profile_pic
+        """,(uid, steam_id, steam_name, creation_time, game_count, total_library_cost, total_steam_time, True, dt.datetime.now(timezone.utc), profile_pic)
+    )
+
+    # I think it would be a good idea to pass a status into this function called link/sync
+    # If we are linking (getting steam info for the first time) we use the update recently played otherwise we don't need to use that function
+    if not is_sync:
+        update_user_recently_played(uid, steam_id, game_filter, cur)
+
+    logger.info(f"Library fully processed for {steam_name}")
+    print(f"Library fully processed for {steam_name}")
+
 
 if __name__ == "__main__":
     # resetdb()

@@ -278,7 +278,7 @@ def look_up_steam_image_and_price(appid : int):
 
             response_key = next(iter(details))
 
-            if details[response_key]['success']:
+            if details[response_key]['success'] and len(details[response_key]['data']) != 0:
                 image = details[response_key]['data']['header_image']
             else:
                 image = None
@@ -288,7 +288,7 @@ def look_up_steam_image_and_price(appid : int):
                 return image, None
             
             response_key = next(iter(details))
-            if details[response_key]['success']:
+            if details[response_key]['success'] and len(details[response_key]['data']) != 0:
                 price_overview = details[response_key]['data'].get('price_overview')
 
                 if price_overview is not None:
@@ -308,9 +308,10 @@ def look_up_steam_image_and_price(appid : int):
     logger.error(f"Could not get Steam data for {appid}")
     return None,None
 
+
 def enriched_info(appid : int):
     details = steam.apps.get_app_details(appid)
-    if details is None:
+    if details is None or len(details) == 0:
         for attempt in range(5):
             logger.warning(f"Could not get app info for appid : {appid} on try : {attempt}")
             time.sleep(60)
@@ -318,23 +319,26 @@ def enriched_info(appid : int):
             details = steam.apps.get_app_details(appid)
             if details is not None:
                 break
-    if details is None:
+    if details is None or len(details) == 0:
         return None, None, None
     
     for attempt in range(5):
         try:
-            if details[f'{appid}']['success']:
-                name = details[f'{appid}']['data']['name']
-                image = details[f'{appid}']['data']['header_image']
+            response_key = next(iter(details))
+            if details[response_key]['success'] and len(details[response_key]['data']) != 0:
+                name = details[response_key]['data']['name']
+                image = details[response_key]['data']['header_image']
             else:
                 name = None
                 image = None     
-
+            
             details = steam.apps.get_app_details(appid,None, "price_overview")
-            if details is None:
+            if details is None or len(details) == 0:
                 return name, image, None
-            if details[f'{appid}']['success'] and len(details[f'{appid}']['data']) != 0:
-                price = details[f'{appid}']['data']['price_overview']['initial']
+            
+            response_key = next(iter(details))
+            if details[response_key]['success'] and len(details[response_key]['data']) != 0:
+                price = details[response_key]['data']['price_overview']['initial']
             else:
                 price = None
 
