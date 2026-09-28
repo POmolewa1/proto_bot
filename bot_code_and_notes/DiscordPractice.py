@@ -1788,7 +1788,7 @@ async def get_game_news():
 
 @tasks.loop(
     time = [
-        dt.time(hour = 23, minute = 28, tzinfo=ZoneInfo("America/Los_Angeles"))
+        dt.time(hour = 3, minute = 0, tzinfo=ZoneInfo("America/Los_Angeles"))
     ]
 )
 async def weekly_game_library_enrichment():
@@ -1802,7 +1802,7 @@ async def weekly_game_library_enrichment():
 
 @tasks.loop(
     time = [
-        dt.time(hour = 23, minute = 28, tzinfo = ZoneInfo("America/Los_Angeles"))
+        dt.time(hour = 18, minute = 14, tzinfo = ZoneInfo("America/Los_Angeles"))
     ]
 )
 async def end_of_day_processes():
@@ -1821,16 +1821,21 @@ async def end_of_day_processes():
     
     logger.info("Began syncing process for users' steam library")
     print("Began syncing process for users' steam library")
+    
+    for guild in client.guilds:
+        await verify_roles_for_guild_and_members(guild)
 
     add_all_daily_users_from_server_log(USER_WAS_ACTIVE)
     print(f"USER_WAS_ACTIVE finished being updated and is now {USER_WAS_ACTIVE}")
-    
+
     tasks = []
     for guild in client.guilds:
         for member in guild.members:
             if member.id == client.user.id:
                 continue
             if member.id in USER_WAS_ACTIVE:
+                print(f"Giving daily xp to member : {member.display_name}")
+                logger.info(f"Giving daily xp to member : {member.display_name}")
                 user_level = get_user_level(member.id, guild.id)
                 conn,cur = create_connection()
                 add_user_xp(member.id, guild.id, 1000, cur)
@@ -1838,7 +1843,6 @@ async def end_of_day_processes():
                 new_level = get_user_level(member.id, guild.id)
                 
                 if user_level != new_level:
-                    #asyncio.create_task(level_up_message(user_level, new_level, member.id, guild))
                     await level_up_message(user_level, new_level, member.id, guild)
 
             auto_sync_enabled = get_auto_sync_value(member.id)
