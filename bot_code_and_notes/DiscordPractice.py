@@ -34,6 +34,8 @@ intents.presences = True
 lock = asyncio.Lock()
 igdbclient = IGDBClient()
 
+USER_WAS_ACTIVE = []
+
 LEVEL_THRESHOLDS = [
     0, # lv. 1
     8000, # lv. 2
@@ -733,6 +735,11 @@ class Client(commands.Bot):
     # When the user changes their status the activity will be updated so after activity will need to check if there is a game that is currently being tracked
     async def on_presence_update(self, before: discord.Member, after: discord.Member):
         # Might be better to add the game to the db and then enrich it for tracking purposes
+        if before.id not in USER_WAS_ACTIVE:
+            USER_WAS_ACTIVE.append(before.id)
+            print(f"Adding member : {before.id} to USER_WAS_ACTIVE list")
+            logger.info(f"USER_WAS_ACTIVE now contains : {USER_WAS_ACTIVE}")
+
         before_game = None
         for activity in before.activities:
             if activity.type == discord.ActivityType.playing:
@@ -1781,7 +1788,7 @@ async def get_game_news():
 
 @tasks.loop(
     time = [
-        dt.time(hour = 7, minute = 0, tzinfo=ZoneInfo("America/Los_Angeles"))
+        dt.time(hour = 23, minute = 28, tzinfo=ZoneInfo("America/Los_Angeles"))
     ]
 )
 async def weekly_game_library_enrichment():
@@ -1795,30 +1802,44 @@ async def weekly_game_library_enrichment():
 
 @tasks.loop(
     time = [
-        dt.time(hour = 23, minute = 58, tzinfo = ZoneInfo("America/Los_Angeles"))
+        dt.time(hour = 23, minute = 28, tzinfo = ZoneInfo("America/Los_Angeles"))
     ]
 )
 async def end_of_day_processes():
+    global USER_WAS_ACTIVE
+
     await client.change_presence(
         activity=discord.Activity(
             type = discord.ActivityType.watching, name = create_activity_flair()
         )
     )
+
     await asyncio.to_thread(restart_tracked_activities)
     logger.info("Resting for 2 minutes")
     print("Resting for 2 minutes")
     await asyncio.sleep(120)
-
+    
     logger.info("Began syncing process for users' steam library")
     print("Began syncing process for users' steam library")
 
-    checked_members = set()
+    add_all_daily_users_from_server_log(USER_WAS_ACTIVE)
+    print(f"USER_WAS_ACTIVE finished being updated and is now {USER_WAS_ACTIVE}")
+    
     tasks = []
     for guild in client.guilds:
         for member in guild.members:
-            if member.id in checked_members or member.id == client.user.id:
+            if member.id == client.user.id:
                 continue
-            checked_members.add(member.id)
+            if member.id in USER_WAS_ACTIVE:
+                user_level = get_user_level(member.id, guild.id)
+                conn,cur = create_connection()
+                add_user_xp(member.id, guild.id, 1000, cur)
+                close_connection(conn, cur)
+                new_level = get_user_level(member.id, guild.id)
+                
+                if user_level != new_level:
+                    #asyncio.create_task(level_up_message(user_level, new_level, member.id, guild))
+                    await level_up_message(user_level, new_level, member.id, guild)
 
             auto_sync_enabled = get_auto_sync_value(member.id)
             
@@ -1840,6 +1861,9 @@ async def end_of_day_processes():
             await mvp_process(guild)
 
         await asyncio.to_thread(weekly_cleanup)
+
+    USER_WAS_ACTIVE = []
+    print("Cleared USER_WAS_ACTIVE list")
 
 HOLIDAYS = {
     (1, 1): "New Year's Day",
@@ -2017,6 +2041,7 @@ def create_holiday_message(holiday=None):
                             "I've seen what real magic can do, after all. ...What? It's not bragging if it's true. 😤"
                         )
     return message
+
 
 
 client.run(os.getenv("DISCORD_TOKEN"), log_handler=handler, log_level=logging.DEBUG)

@@ -2102,7 +2102,7 @@ def adjust_mvp_mult(discord_id, guild_id, reset : bool, cur : db.extensions.curs
     if reset:
         cur.execute(
             """UPDATE guilds_users
-                SET mvp_mult = 80
+                SET mvp_mult = 70
                 WHERE user_id = %s
                 AND guild_id = %s
             """,(uid, guild_id)
@@ -2124,15 +2124,15 @@ def update_user_mvp_data(discord_id, guild_id, placement, cur : db.extensions.cu
     match placement:
         case 0:
             column = "mvps"
-            add_user_xp(discord_id, guild_id, 100, cur)
+            add_user_xp(discord_id, guild_id, 10000, cur)
             adjust_mvp_mult(discord_id, guild_id, True, cur)
         case 1:
             column = "second_places"
-            add_user_xp(discord_id, guild_id, 50, cur)
+            add_user_xp(discord_id, guild_id, 5000, cur)
             adjust_mvp_mult(discord_id, guild_id, False, cur)
         case 2:
             column = "third_places"
-            add_user_xp(discord_id, guild_id, 25, cur)
+            add_user_xp(discord_id, guild_id, 2500, cur)
             adjust_mvp_mult(discord_id, guild_id, False, cur)
         case _:
             return
@@ -2777,6 +2777,30 @@ def get_all_guild_role_ids(guild_id):
         return list(result)
     finally:
         close_connection(conn, cur)
+
+def add_all_daily_users_from_server_log(USER_WAS_ACTIVE):
+    conn,cur = create_connection()
+    try:
+        day_period = dt.datetime.now(timezone.utc) - dt.timedelta(days=1)
+        cur.execute(
+            """SELECT DISTINCT users.discord_id
+                FROM users
+                JOIN server_log
+                ON
+                    users.id = server_log.user_id
+                WHERE server_log.start_time >= %s
+            """,(day_period,)
+        )
+
+        results = cur.fetchall()
+        if not results:
+            return
+
+        for result in results:
+            if result[0] not in USER_WAS_ACTIVE:
+                USER_WAS_ACTIVE.append(result[0])
+    finally:
+        close_connection(conn,cur)
 
 if __name__ == "__main__":
     # resetdb()
