@@ -16,6 +16,10 @@ import requests
 import logging
 import time
 from zoneinfo import ZoneInfo
+import re
+import unicodedata
+from difflib import SequenceMatcher
+
 
 logger = logging.getLogger(__name__)
 KEY = os.getenv("STEAM_API_KEY")
@@ -122,6 +126,8 @@ title = 930210
 
 # game_info = steam.apps.search_games("Warhammer: Vermintide 2")
 # print(game_info['apps'][0])
+# game_info = steam.apps.search_games("slay the spire 2")
+# print(game_info)
 
 # date = dt.datetime.now(timezone.utc)
 # recency_scaling = dt.timedelta(days = 3)
@@ -204,15 +210,69 @@ def get_recently_played_games(steam_id):
 
     return games
 
+
+def normalize_game_name(name):
+    name = unicodedata.normalize("NFKD", name)
+    name = name.lower()
+
+    # Remove trademark/copyright/registered symbols
+    name = name.replace("™", "")
+    name = name.replace("®", "")
+    name = name.replace("©", "")
+
+    # Normalize whitespace
+    name = re.sub(r"\s+", " ", name).strip()
+
+    return name
+
 def check_steam_game_availability(name):
     result = steam.apps.search_games(name)
 
     if len(result['apps']) == 0:
-        return False,None
-    if result['apps'][0]['name'] != name:
-        return False,None
+        return False, None
 
-    return True, result['apps'][0]
+    normalized_name = normalize_game_name(name)
+
+    best_match = None
+    best_similarity = 0
+
+    for game in result['apps']:
+        steam_name = normalize_game_name(game['name'])
+
+        similarity = SequenceMatcher(
+            None,
+            normalized_name,
+            steam_name
+        ).ratio()
+
+        if similarity > best_similarity:
+            best_similarity = similarity
+            best_match = game
+
+    print(
+        f"Best match: {name} -> {best_match['name']} "
+        f"({best_similarity:.2%})"
+    )
+
+    if best_similarity < 0.90:
+        return False, None
+
+    return True, best_match
+
+
+# x,y = check_steam_game_availability("Slay the Spire II")
+# print(y)
+# image = steam.apps.get_app_details(2868840)
+# print(image)
+# def check_steam_game_availability(name):
+#     result = steam.apps.search_games(name)
+
+#     if len(result['apps']) == 0:
+#         return False,None
+#     if result['apps'][0]['name'] != name:
+#         return False,None
+
+#     return True, result['apps'][0]
     
 
 def print_price():

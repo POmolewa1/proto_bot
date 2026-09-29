@@ -635,7 +635,7 @@ def get_help_message3():
     
 def normalize_game_name(game_name):
     duplicates = {
-        "HELLDIVERS 2" : "HELLDIVERS™ 2"
+        "HELLDIVERS 2" : "HELLDIVERS™ 2",
     }
 
     if game_name in duplicates:
@@ -737,7 +737,7 @@ class Client(commands.Bot):
         # Might be better to add the game to the db and then enrich it for tracking purposes
         if before.id not in USER_WAS_ACTIVE:
             USER_WAS_ACTIVE.append(before.id)
-            print(f"Adding member : {before.id} to USER_WAS_ACTIVE list")
+            print(f"Adding member : {before.id} ({before.display_name}) to USER_WAS_ACTIVE list")
             logger.info(f"USER_WAS_ACTIVE now contains : {USER_WAS_ACTIVE}")
 
         before_game = None
@@ -758,7 +758,7 @@ class Client(commands.Bot):
                 break
 
         if before_game == after_game:
-            return
+            before_game = None
 
        # ending session is still not implemented yet
         if before_game != None:
@@ -773,12 +773,13 @@ class Client(commands.Bot):
             try:
                 print(f"adding {member_id} to filter")
                 processing_user.add(member_id)
-                snapshot, guild_table = get_level_snapshot(member_id, self.guilds)
+                snapshot, guild_table = await asyncio.to_thread(get_level_snapshot, member_id, self.guilds)
+                
                 #print(f"IN : {snapshot}")
 
                 await asyncio.to_thread(end_game_tracking_process, before.id, game, "PLAYING", before.guild.id)
 
-                new_snapshot, _ = get_level_snapshot(member_id, self.guilds)
+                new_snapshot, _ = await asyncio.to_thread(get_level_snapshot, member_id, self.guilds)
                 #print(f"OUT : {new_snapshot}")
                 for guild_id in new_snapshot:
                     if new_snapshot[guild_id] != snapshot[guild_id]:
@@ -891,7 +892,7 @@ def create_activity_flair():
     message = ""
 
     if len(ACTIVITY_LIST) == 0:
-        for i in range(7):
+        for i in range(10):
             ACTIVITY_LIST.append(i+1)
         random.shuffle(ACTIVITY_LIST)
         print(f"New activity list : {ACTIVITY_LIST}")
@@ -923,10 +924,23 @@ def create_activity_flair():
         case 7:
             message = "Being blessed by Sothis 😇"
 
+        case 8:
+            message = "Having tea with old friends 🫖"
+
+        case 9:
+            message = "⚔️ Fighting bandits ⚔️"
+
+        case 10:
+            message = "Playing : Fire Emblem 🕹️"
+
     return message
 
 
 def get_level_snapshot(member_id, guilds):
+    # Test if db is online
+    conn,cur = create_connection_with_rety()
+    close_connection(conn,cur)
+
     users_guilds_and_levels = {}
     guild_table = {}
     for guild in guilds:
@@ -1203,7 +1217,7 @@ def format_age(age):
 
 def create_server_profile_card(user, guild_id):
     #game_pic = "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/2893570/035bf8ec4e6bd65ebea782063b1157e526533740/header.jpg?t=1773044632"
-    conn,cur = create_connection()
+    conn,cur = create_connection_with_rety()
     game_name, game_pic = get_recently_played_game_img(user.id, cur)
     pdata = get_user_server_stats(user.id, guild_id, cur)
     activity_data = get_user_activity(user.id, cur)
@@ -1223,7 +1237,7 @@ def create_game_library_card(user, b_color):
     start_index = 0
     if library is None:
         card = GuildCard(user, b_color)
-        card.game_library_card(library,start_index)
+        card.game_library_card(library,start_index, 0)
         library_pages.append(card)
         close_connection(conn, cur)
         return library_pages
@@ -1324,37 +1338,42 @@ def create_response(url, user_list):
         
 
 def end_game_tracking_process(member_id, game_name, activity_type, guild_id):
-    conn ,cur = create_connection()
-    end_tracker(member_id, game_name, activity_type, guild_id, cur)
-    close_connection(conn,cur)
+    conn ,cur = create_connection_with_rety()
+    try:
+        end_tracker(member_id, game_name, activity_type, guild_id, cur)
+    finally:
+        close_connection(conn,cur)
 
 
 def start_game_tracking_process(game, after : discord.Member, activity_type, guild_id):
-    conn,cur = create_connection()
-    # Immediatly update the game and user profiles with the new data if data not found
-    
-    if activity_type == "PLAYING":
 
-        if not game_name_in_database(game, cur):
-            add_game_to_database(game, igdbclient, cur)
-            add_game_to_user_profile(game, after.id, cur)
-            conn.commit()
-
-        game_filter = get_filterd_games(cur)
-        gid = get_game_id_from_name(game, cur)
-        if gid in game_filter:
-            logger.info(f"Game : {game} was found in the filter and was not added to member {after.id} profile")
-            return
+    conn,cur = create_connection_with_rety()
+    try:
+        # Immediatly update the game and user profiles with the new data if data not found
         
-        if not user_owns_game(after.id, game, cur):
-            add_game_to_user_profile(game, after.id, cur)
-            conn.commit()
-        start_time = dt.datetime.now(timezone.utc)
-        logging.info(f"{after.display_name} has started to play {game} at around {start_time}")
+        if activity_type == "PLAYING":
 
-    #gid = get_game_id_from_name(game, cur)
-    start_activity_tracker(after.id, game, activity_type, guild_id, cur)
-    close_connection(conn,cur)
+            if not game_name_in_database(game, cur):
+                add_game_to_database(game, igdbclient, cur)
+                add_game_to_user_profile(game, after.id, cur)
+                conn.commit()
+
+            game_filter = get_filterd_games(cur)
+            gid = get_game_id_from_name(game, cur)
+            if gid in game_filter:
+                logger.info(f"Game : {game} was found in the filter and was not added to member {after.id} profile")
+                return
+            
+            if not user_owns_game(after.id, game, cur):
+                add_game_to_user_profile(game, after.id, cur)
+                conn.commit()
+            start_time = dt.datetime.now(timezone.utc)
+            logging.info(f"{after.display_name} has started to play {game} at around {start_time}")
+
+        #gid = get_game_id_from_name(game, cur)
+        start_activity_tracker(after.id, game, activity_type, guild_id, cur)
+    finally:
+        close_connection(conn,cur)
     #print(f"{after.display_name} has started to play {game} at {self.start_time}")
     
 
@@ -1370,7 +1389,7 @@ def verify_linking_criteria(member_id, steam_id):
 
 
 def syncing_process(member_id):
-    conn,cur = create_connection()
+    conn,cur = create_connection_with_rety()
     try:
         steam_id = get_user_steam_id(member_id, cur)
         if steam_id is None:
@@ -1408,7 +1427,8 @@ def get_user_rank(user_level):
 
 def get_user_level(member_id, guild_id):
     xp = get_user_xp(member_id, guild_id)
-
+    if xp is None:
+        return
     level = 0
     for milestone in LEVEL_THRESHOLDS:
         if xp >= milestone:
@@ -1449,7 +1469,7 @@ def create_flare():
 
 
 async def level_up_message(prev_level, new_level, user_id, guild : discord.Guild):
-    conn,cur = create_connection()
+    conn,cur = await asyncio.to_thread(create_connection_with_rety)
     level_up_channel = get_channel(2, guild, cur)
     close_connection(conn,cur)
     if level_up_channel is None:
@@ -1473,11 +1493,14 @@ async def level_up_message(prev_level, new_level, user_id, guild : discord.Guild
     )
     added_flair = create_flare()
     message = info + added_flair +  "\n\n---"
-    await level_up_channel.send(
+    
+    level_up_message = await level_up_channel.send(
         content= message,
         embed= server, 
         view = view
     )
+    
+    view.message = level_up_message
 
 SYNC_WORKERS = 5
 syncing_process_sem = asyncio.Semaphore(SYNC_WORKERS)
@@ -1705,7 +1728,8 @@ async def unlink_steam(interation : discord.Interaction):
     guild = client.get_guild(guild_id)
     member = guild.get_member(discord_id)
 
-    conn,cur = create_connection()
+    #conn,cur = create_connection()
+    conn,cur = asyncio.to_thread(create_connection_with_rety)
     steam_name = get_steam_name(discord_id, cur)
     await interation.response.send_message(f"Deleting account tied to {steam_name}")
     remove_user_steam_data(discord_id, cur)
@@ -1799,6 +1823,7 @@ async def weekly_game_library_enrichment():
         await enrich_games_database(igdbclient)
 
 
+
 @tasks.loop(
     time = [
         dt.time(hour = 23, minute = 58, tzinfo = ZoneInfo("America/Los_Angeles"))
@@ -1827,21 +1852,6 @@ async def end_of_day_processes():
 
     add_all_daily_users_from_server_log(USER_WAS_ACTIVE)
     print(f"USER_WAS_ACTIVE finished being updated and is now {USER_WAS_ACTIVE}")
-
-    # give daily xp
-    for guild in client.guilds:
-        for member in guild.members:
-            if member.id in USER_WAS_ACTIVE:
-                print(f"Giving daily xp to member : {member.display_name}")
-                logger.info(f"Giving daily xp to member : {member.display_name}")
-                user_level = get_user_level(member.id, guild.id)
-                conn,cur = create_connection()
-                add_user_xp(member.id, guild.id, 1000, cur)
-                close_connection(conn, cur)
-                new_level = get_user_level(member.id, guild.id)
-                
-                if user_level != new_level:
-                    await level_up_message(user_level, new_level, member.id, guild)
 
     processed_users = set()
     tasks = []
@@ -1873,9 +1883,24 @@ async def end_of_day_processes():
 
         await asyncio.to_thread(weekly_cleanup)
 
+    # give daily xp
+    for guild in client.guilds:
+        for member in guild.members:
+            if member.id in USER_WAS_ACTIVE:
+                print(f"Giving daily xp to member : {member.display_name}")
+                logger.info(f"Giving daily xp to member : {member.display_name}")
+                user_level = get_user_level(member.id, guild.id)
+                conn,cur = create_connection()
+                add_user_xp(member.id, guild.id, 1000, cur)
+                close_connection(conn, cur)
+                new_level = get_user_level(member.id, guild.id)
+                
+                if user_level != new_level:
+                    await level_up_message(user_level, new_level, member.id, guild)
+
     USER_WAS_ACTIVE = []
     print("Cleared USER_WAS_ACTIVE list")
-
+    
 
 HOLIDAYS = {
     (1, 1): "New Year's Day",
@@ -1889,6 +1914,7 @@ def get_thanksgiving(year):
     days_until_thursday = (3 - november_first.weekday()) % 7
     first_thursday = november_first + dt.timedelta(days=days_until_thursday)
     return first_thursday + dt.timedelta(weeks=3)
+
 @tasks.loop(
     time = [
         dt.time(hour =7, minute = 0, tzinfo = ZoneInfo("America/Los_Angeles"))
@@ -1909,7 +1935,7 @@ async def holiday_message():
         return
 
     for guild in client.guilds:
-        conn,cur = create_connection()
+        conn,cur = await asyncio.to_thread(create_connection_with_rety)
         channel = get_channel(1, guild, cur)
         close_connection(conn, cur)
         if channel is None:
