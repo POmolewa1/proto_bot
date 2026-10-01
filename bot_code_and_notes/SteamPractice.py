@@ -53,8 +53,11 @@ title = 930210
 
 # user_games = steam.users.get_user_details("76561198868092917")
 # user_games = steam.users.search_user("GethUprising")
-# user_games = steam.users.get_owned_games("76561198868092917")
-# print(user_games)
+# user_games = steam.users.get_owned_games("76561198382098459")
+#print(user_games)
+# with open("t.txt", 'w', encoding="utf-8") as file:
+#     for game in user_games['games']:
+#         file.write(game['name'] + "\n")
 # if user_games == "No match":
 #     print("None")
 

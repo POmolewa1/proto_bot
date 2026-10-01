@@ -493,10 +493,20 @@ class WeekBreakdown(discord.Embed):
         if len(game_list) == 0:
             return
         
+        last_weeks_popular_game = get_last_weeks_popular_game()
+        penalized_game = None
+        if last_weeks_popular_game is not None:
+            for i, (game_name, game_data) in enumerate(game_list):
+                if game_name == last_weeks_popular_game:
+                    penalized_game = game_list.pop(i)
+                    break
+                
+            clear_last_weeks_popular_game()
+
         total_games = len(game_list)
         if total_games > 17:
             game_list = game_list[ : 18]
-
+       
         for game_name, game_data in game_list:
             if game_name == game_list[0][0]:
                 self.add_field(
@@ -510,6 +520,18 @@ class WeekBreakdown(discord.Embed):
                 self.add_field(
                     name=f"🎲 {game_name}", 
                     value= (
+                        create_string(game_data['players'], game_data['total_time'], guild)
+                    ),
+                    inline= False
+                )
+
+        if penalized_game is not None:
+            game_name, game_data = penalized_game
+            self.add_field(
+                    name=f"❌ {game_name}", 
+                    value= (
+                        "This game was the most popular last week, so I've reduced its score a little. " +
+                        "Honestly, we can't let it steal the spotlight every week, can we?" + 
                         create_string(game_data['players'], game_data['total_time'], guild)
                     ),
                     inline= False
@@ -711,8 +733,8 @@ class Client(commands.Bot):
             await level_up_message(level, new_level, message.author.id, message.guild)
 
         # For testing
-        # if message.content.startswith("m"):
-        #     await mvp_process(message.guild)
+        if message.content.startswith("m"):
+            await mvp_process(message.guild)
 
         # if message.content.startswith("h"):
         #     channel = self.get_channel(1552002381439443114)
@@ -993,10 +1015,14 @@ def calculate_mvp_score(mvp_data):
         stream_time_score = (mvp_data[user]['stream_time'] / 900) * 6
         messages_score = min(mvp_data[user]['messages'], 20) 
         score_mult = mvp_data[user]['mvp_mult'] / 100
+        score_penalty = (mvp_data[user]['penalized_game_time']/ 900) * 1/3
 
-        mvp_data[user]['score'] = (playtime_score + call_time_score + stream_time_score + messages_score) * score_mult
+        mvp_data[user]['score'] = (playtime_score + call_time_score + stream_time_score + messages_score - score_penalty) * score_mult
 
-        user_score_breakdown[user] = f"({playtime_score: .2f} +{call_time_score: .2f} +{stream_time_score: .2f} + {messages_score}) *{score_mult: .2f} = {mvp_data[user]['score']: .2f}"
+        if score_penalty > 0:
+            user_score_breakdown[user] = f"({playtime_score: .2f} +{call_time_score: .2f} +{stream_time_score: .2f} + {messages_score} -{score_penalty: .2f}) *{score_mult: .2f} = {mvp_data[user]['score']: .2f}"
+        else:
+            user_score_breakdown[user] = f"({playtime_score: .2f} +{call_time_score: .2f} +{stream_time_score: .2f} + {messages_score}) *{score_mult: .2f} = {mvp_data[user]['score']: .2f}"
 
     print(mvp_data)
     print('\n')
@@ -1008,7 +1034,7 @@ def create_mvp_breakdown_message(leaderboard, user_score_breakdown, guild : disc
     # add more to this later
     string = (
             "```text\n"
-            f"Point calculation:\n(playtime + call time + stream time + messages) * score_mult\n\n"
+            f"Point calculation:\n(playtime + call time + stream time + messages - penalty) * score_mult\n\n"
             "🏆 WEEKLY MVP\n"
             "────────────────────────────────────────\n\n"
         )
@@ -1083,6 +1109,7 @@ async def mvp_process(guild : discord.Guild):
     finally:
         close_connection(conn, cur)
 
+    # In this case the user messages are seperated into their own category to be made into a leaderboard 
     mvp_data_sorted_by_messages = sorted(
         mvp_data.items(),
         key = lambda x:x[1]['messages'],
@@ -1265,21 +1292,30 @@ def create_steam_card(user, b_color):
     return steam_card
 
 
-def create_response(url, user_list):
+def create_response(url, user_list, mentioned_users):
     variant = random.randint(1,3)
     members = ""
 
     count = 0
     for user in user_list:
         member = client.get_user(user)
+        if member is None:
+            continue
+
+        if member.id not in mentioned_users:
+            mentioned_users.add(member.id)
+            user_name = member.mention
+        else:
+            user_name = member.display_name
+        
         if len(user_list) > 2 and count != (len(user_list) - 1):
-            members += f"{member.mention}, "
+            members += f"{user_name}, "
             count += 1
         elif len(user_list) >= 2 and count == (len(user_list) - 1):
-            members += f"and {member.mention}"
+            members += f"and {user_name}"
             count += 1
         else:
-            members += f"{member.mention} "
+            members += f"{user_name} "
             count += 1
     
     if len(user_list) > 1:
@@ -1729,9 +1765,14 @@ async def unlink_steam(interation : discord.Interaction):
     member = guild.get_member(discord_id)
 
     #conn,cur = create_connection()
-    conn,cur = asyncio.to_thread(create_connection_with_rety)
+    conn,cur = await asyncio.to_thread(create_connection_with_rety)
     steam_name = get_steam_name(discord_id, cur)
-    await interation.response.send_message(f"Deleting account tied to {steam_name}")
+    if steam_name is None:
+        close_connection(conn,cur)
+        await interation.response.send_message(f"It looks like you don't have a linked steam account.", ephemeral=True)
+        return
+
+    await interation.response.send_message(f"Deleting account tied to {steam_name}", ephemeral=True)
     remove_user_steam_data(discord_id, cur)
     close_connection(conn,cur)
 
@@ -1801,10 +1842,11 @@ async def get_game_news():
             logger.error(f"Could not find a channel in guild : {guild.id}")
             continue
 
+        mentioned_users = set()
         for game_id, game_data in news_dictionary.items():
             if len(game_data['news_articles']) != 0:
                 for article_url in game_data['news_articles']:
-                    message = create_response(article_url, game_data['relavent_members'])
+                    message = create_response(article_url, game_data['relavent_members'], mentioned_users)
                     await channel.send(message)
     logger.info("news search finished")
     print("news search finished")
@@ -1936,7 +1978,7 @@ async def holiday_message():
 
     for guild in client.guilds:
         conn,cur = await asyncio.to_thread(create_connection_with_rety)
-        channel = get_channel(1, guild, cur)
+        channel = get_channel(3, guild, cur)
         close_connection(conn, cur)
         if channel is None:
             continue
@@ -2079,7 +2121,6 @@ def create_holiday_message(holiday=None):
                             "I've seen what real magic can do, after all. ...What? It's not bragging if it's true. 😤"
                         )
     return message
-
 
 
 client.run(os.getenv("DISCORD_TOKEN"), log_handler=handler, log_level=logging.DEBUG)
